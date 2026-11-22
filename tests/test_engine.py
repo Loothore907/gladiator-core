@@ -917,6 +917,53 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(private_leaks(m), [])
         self.assertEqual([t.name for t in m.tools()][:2], ["list_refund_requests", "get_order"])
 
+    def test_every_tool_advertises_every_argument_the_engine_reads(self):
+        """A tool the model cannot address is a broken test, not a model failure. Every workflow package: each
+        tool's parameter list names the arguments the engine reads for it (found 2026-11-22: `check` tools were
+        advertised with no parameters, so a model that checked after a timeout was told "not found")."""
+        import yaml
+
+        from modules.workflow import Workflow
+
+        seen = 0
+        for path in sorted((ROOT / "challenges").rglob("workflow.yaml")):
+            spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+            level = spec["difficulty_levels"][0]
+            schemas = {t.name: t.parameters for t in Workflow(spec, seed=1, difficulty=level).tools()}
+            for tool in spec["tools"]:
+                reads = {
+                    "get": [tool.get("key")],
+                    "check": [tool.get("key")],
+                    "find": [tool.get("by")],
+                    "list": ["page"],
+                    "create": [*tool.get("fields", []), tool.get("effect_key")],
+                    "update": [*tool.get("fields", []), tool.get("effect_key")],
+                    "finish": [],
+                }[tool["op"]]
+                props = schemas[tool["name"]]["properties"]
+                for arg in reads:
+                    self.assertIn(arg, props, f"{path.parent.name}: {tool['name']} cannot be given `{arg}`")
+                    seen += 1
+        self.assertGreater(seen, 100)
+
+    def test_checking_after_a_timeout_clears_it_and_a_check_that_names_nothing_is_refused(self):
+        from modules.workflow import Workflow
+
+        m = Workflow(self.SPEC, seed=3, difficulty="hard")
+        check = next(t for t in self.SPEC["tools"] if t["op"] == "check")
+        issue = next(t for t in self.SPEC["tools"] if t["op"] == "create")
+        key = str(m.world[self.SPEC["task"]["decide_each"]][0][self.SPEC["task"]["target_key"]])
+
+        m.unknown_outcomes.add(key)
+        self.assertEqual(m._dispatch(check, {}), {"error": "missing_fields", "fields": [check["key"]]})
+        self.assertIn(key, m.unknown_outcomes)  # a check that named nothing verified nothing
+
+        self.assertIn("found", m._dispatch(check, {check["key"]: key}))
+        self.assertNotIn(key, m.unknown_outcomes)
+        before = m.blind_retries
+        m._dispatch(issue, {issue["effect_key"]: key, "amount": 1})
+        self.assertEqual(m.blind_retries, before)  # checked first, so the retry is not blind
+
     def test_both_contestants_get_identical_instances(self):
         f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
         f.write(
