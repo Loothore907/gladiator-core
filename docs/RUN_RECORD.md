@@ -13,7 +13,7 @@ in memory; the file and its seal never change.
 | Field | What |
 |---|---|
 | `record_version` | Schema version (2). Absent = 1. |
-| `engine_commit` | Git commit of the engine that ran the match (the CI commit on GitHub runs). |
+| `engine_commit` | Git commit of the engine checkout that ran the match (the CI commit only when the engine has no checkout of its own). |
 | `run_id`, `started_unix`, `wall_s` | Identity and timing. |
 | `suite` | Name, version, path, sha256, node order, success rule, and each challenge's provenance (id, version, `content_sha256`, trust status at run time, tags, test type, licence). |
 | `settings` | Suite defaults, overrides, per-contestant settings (and whether they were equal), repeats, the instance salt (both sides get identical worlds), per-node settings. |

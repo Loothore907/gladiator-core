@@ -4,6 +4,8 @@ python -m unittest discover -s tests -v
 """
 
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -1605,6 +1607,20 @@ class RunRecordTests(unittest.TestCase):
         a, b = body["contestants"]["A"]["results"][0], body["contestants"]["B"]["results"][0]
         self.assertTrue(a["passed"] and a["first_pass"])
         self.assertFalse(b["first_pass"])
+
+    def test_engine_commit_is_the_engines_own_checkout_not_the_ci_job(self):
+        """A workflow in another repository can check the engine out and run it: the record must name the
+        engine's commit, not that job's GITHUB_SHA. A folder that is not the top of a checkout gives None."""
+        root = Path(runner.__file__).resolve().parent.parent
+        own = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=root)
+        with mock.patch.dict(os.environ, {"GITHUB_SHA": "f" * 40}):
+            if own.returncode == 0 and (root / ".git").exists():
+                self.assertEqual(runner.engine_commit(), own.stdout.strip())
+            else:  # no checkout (e.g. a container image): the CI commit is the fallback
+                self.assertEqual(runner.engine_commit(), "f" * 40)
+            self.assertIsNone(runner._git_commit(root / "engine"))  # inside a checkout, but not its top
+            with tempfile.TemporaryDirectory() as tmp:
+                self.assertIsNone(runner._git_commit(Path(tmp)))
 
     def test_old_records_are_upgraded_when_read(self):
         from engine.record import upgrade

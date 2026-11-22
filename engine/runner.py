@@ -21,6 +21,7 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from pathlib import Path
 
 import modules
 import providers
@@ -33,13 +34,32 @@ from providers.base import FatalProviderError, ProviderError, Settings
 RECORD_VERSION = 2
 
 
-def _git_commit() -> str | None:
-    """The engine's git commit, so a record says exactly which code produced it (None outside a checkout)."""
+def _git_commit(root: Path | None = None) -> str | None:
+    """The git commit of the engine's own checkout, so a record says exactly which code produced it.
+
+    Asked of the directory the engine lives in, not the working directory or the CI job's commit: when another
+    repository's workflow checks the engine out and runs it, the record must still name the engine's commit.
+    None when the engine is not the top of a git checkout (a container image, an installed copy).
+    """
+    root = (root or Path(__file__).resolve().parent.parent).resolve()
     try:
-        out = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, check=True)
-        return out.stdout.strip() or None
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+            cwd=root,
+        )
+        top, _, commit = out.stdout.strip().partition("\n")
+        return commit.strip() or None if Path(top.strip()).resolve() == root else None
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def engine_commit() -> str | None:
+    """The engine's commit: its own checkout first, else the CI commit (a build with no .git directory)."""
+    return _git_commit() or os.environ.get("GITHUB_SHA") or None
 
 
 NODE_TIME_LIMIT_S = 600  # default per-attempt wall limit (v1's); suites can set attempt_time_limit_s
@@ -343,7 +363,7 @@ def run_match(
     sample = {s: node_settings(suite, first, per_side[s]) for s in ("A", "B")}
     return {
         "record_version": RECORD_VERSION,
-        "engine_commit": os.environ.get("GITHUB_SHA") or _git_commit(),
+        "engine_commit": engine_commit(),
         "suite": {
             "name": suite["suite"],
             "version": suite.get("version"),

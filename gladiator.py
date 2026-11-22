@@ -183,15 +183,14 @@ def write_validation_record(pkg, spec):
     """Save validations/<namespace>/<name>@<version>.json: the sealed evidence that this exact package version
     passed (or failed) automatic validation. Free to regenerate (no model calls)."""
     import datetime
-    import os
 
-    from engine.runner import _git_commit
+    from engine.runner import engine_commit
     from engine.validate import validation_record
 
     m = pkg.manifest
     provenance = {"id": m["id"], "version": m["version"], "content_sha256": m.get("content_sha256")}
     when = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    body = validation_record(spec, provenance, os.environ.get("GITHUB_SHA") or _git_commit(), when)
+    body = validation_record(spec, provenance, engine_commit(), when)
     path = ROOT / "validations" / f"{m['id']}@{m['version']}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"sha256": record.sha256(body), "body": body}, indent=1) + "\n", encoding="utf-8")
