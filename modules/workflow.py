@@ -884,7 +884,7 @@ class Workflow(Module):
 
     def _schema(self, t):
         props, required = {}, []
-        if t["op"] in ("get",):
+        if t["op"] in ("get", "check"):  # both look one thing up by its key, so the model must be able to send it
             props[t["key"]] = {"type": "string"}
             required.append(t["key"])
         elif t["op"] == "find":
@@ -963,6 +963,8 @@ class Workflow(Module):
             self.reads.add((tool["table"], value))
             return {"items": [_shown(r, tool) for r in rows]}
         if op == "check":  # look up an effect by key in the effect table (verification after a fault)
+            if args.get(tool["key"]) in (None, ""):  # never answer "not found" for a lookup that named nothing
+                return {"error": "missing_fields", "fields": [tool["key"]]}
             key = str(args.get(tool["key"], ""))
             self.unknown_outcomes.discard(key)
             row = next((r for r in self.world[task["effect_table"]] if str(r[tool["key"]]) == key), None)
