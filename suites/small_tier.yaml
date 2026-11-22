@@ -1,0 +1,29 @@
+suite: small-tier
+version: 1
+description: >
+  The core track (docs/PRODUCT.md, "What wins: efficiency"): small and mid-tier models on the four workflow
+  challenges at the standard level, under a hard per-attempt budget, scored on the budget profile (cost and
+  tokens weigh most). An attempt that runs out of its budget ends as over_budget and counts as not finished.
+  Cheap: a small model spends cents per attempt here.
+
+defaults:
+  max_output_tokens: 4096   # includes reasoning/thinking tokens
+  effort: low
+  timeout_s: 180
+  difficulty: standard
+  attempt_budget_usd: 0.12  # hard budget per attempt (a test condition, not a safety net)
+
+success:
+  primary: outcome
+  profile: budget            # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [passed, task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: refund-queue
+    challenge: gladiator/refund-queue@2.2.0
+  - id: access-review
+    challenge: gladiator/access-review@1.2.0
+  - id: incident-triage
+    challenge: gladiator/incident-triage@1.2.0
+  - id: inventory-transfer
+    challenge: gladiator/inventory-transfer@1.2.0

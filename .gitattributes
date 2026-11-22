@@ -1,0 +1,6 @@
+# Keep line endings as LF everywhere, on every OS (Windows Git would otherwise convert to CRLF).
+* text=auto eol=lf
+
+# The v1 simulators are pinned by SHA-256: Git must never alter a single byte of them.
+simulators/** -text
+tests/fixtures/** -text

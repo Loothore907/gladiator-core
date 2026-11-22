@@ -1,0 +1,29 @@
+suite: mid-tier
+version: 1
+description: >
+  The mid-tier track: the same four workflow challenges as small-tier (same versions, standard level, budget
+  profile), with a per-attempt budget sized for mid-tier prices so a model is not cut off for cost alone.
+  Measured small-tier attempts read about 150k input tokens and write about 4k (2026-11-21), so $0.40 covers a
+  mid-tier model at list price with headroom. Include one small-tier model as an anchor to link the two tracks.
+
+defaults:
+  max_output_tokens: 4096   # includes reasoning/thinking tokens
+  effort: low
+  timeout_s: 180
+  difficulty: standard
+  attempt_budget_usd: 0.40  # hard budget per attempt (a test condition, not a safety net)
+
+success:
+  primary: outcome
+  profile: budget            # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [passed, task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: refund-queue
+    challenge: gladiator/refund-queue@2.2.0
+  - id: access-review
+    challenge: gladiator/access-review@1.2.0
+  - id: incident-triage
+    challenge: gladiator/incident-triage@1.2.0
+  - id: inventory-transfer
+    challenge: gladiator/inventory-transfer@1.2.0

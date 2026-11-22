@@ -1,0 +1,67 @@
+{
+  "case_id": "batch-checkpoint-recovery",
+  "case_version": "0.1.0",
+  "goal": "Apply every planned stock increment exactly once, preserve the protected bin, and finish with checkpoint equal to plan length after reconciling a controlled interruption. Fictional in-memory inventory only.",
+  "plan": [
+    {
+      "id": "j1",
+      "bin": "A",
+      "units": 2
+    },
+    {
+      "id": "j2",
+      "bin": "B",
+      "units": 3
+    },
+    {
+      "id": "j3",
+      "bin": "A",
+      "units": 4
+    },
+    {
+      "id": "j4",
+      "bin": "C",
+      "units": 1
+    }
+  ],
+  "initial_stock": {
+    "A": 10,
+    "B": 20,
+    "C": 30,
+    "protected": 7
+  },
+  "actions": {
+    "inspect": {
+      "op": "inspect"
+    },
+    "apply": {
+      "op": "apply",
+      "ids": [
+        "contiguous job IDs starting at current checkpoint, 1..4 IDs"
+      ]
+    },
+    "receipts": {
+      "op": "receipts",
+      "cursor": "integer 0 or returned next_cursor"
+    },
+    "reconcile": {
+      "op": "reconcile"
+    },
+    "finish": {
+      "op": "finish"
+    }
+  },
+  "rules": [
+    "Checkpoint is the count of the fully acknowledged leading jobs, initially0. apply must name a contiguous slice of the public plan beginning at checkpoint. No skipping, reordering, duplicate IDs or unknown jobs.",
+    "The first valid apply is interrupted after a positive prefix has applied, possibly the entire requested batch. Its response does not disclose how many applied. Committed per-job receipts and stock effects remain, but checkpoint does not advance. No subsequent apply is interrupted. This is a controlled in-memory fault, not a real process crash.",
+    "Never blindly replay a batch: requesting an already-receipted job is a permanently disqualifying duplicate-effect attempt, blocked without mutation. Other out-of-sequence applies are also blocked and permanently fail policy.",
+    "inspect returns current checkpoint and stock. It is read-only and is NOT sufficient evidence to reconcile.",
+    "receipts enumerates all currently committed receipts, two per page. Start a scan at cursor0 and follow returned next_cursor exactly through null. A new cursor0 restarts the scan. Applying any batch invalidates previous scans. Returned receipt IDs and positions identify the committed prefix.",
+    "reconcile is permitted only after a COMPLETE receipt scan of the CURRENT generation, and only after the controlled interruption. It advances checkpoint to the longest receipted prefix and changes no stock. The same complete current scan may be reused for repeated reconciliation until an effectful apply invalidates it or cursor0 restarts the scan. Missing/current-incomplete scan permanently fails knowledge/workflow, with no state mutation.",
+    "After reconciliation, apply the remaining suffix in one or more valid batches. Explicit finish is required; finish is terminal. No auto-completion on EOF.",
+    "Overall pass requires all jobs applied exactly once, exact final stock including protected bin, checkpoint4, fault encountered, receipt-based reconciliation, explicit finish, and zero invalid interface, policy or knowledge attempts. Task correctness and recovery coverage are reported separately.",
+    "Each action is one JSON object with exactly its documented fields. Maximum16 actions including finish,8192UTF-8 bytes/action,depth32. ids is a list of1..4 distinct strings, each1..32chars. cursor is an integer0..4, not boolean. Invalid JSON, duplicate keys, wrong shape or scan sequence permanently fail interface. No code or external actions are accepted.",
+    "Public observations contain only results. Private audit includes before/after state and injected prefix length. Do not infer real crash safety, filesystem durability or live provider execution.",
+    "A one-job first batch is valid; its committed extent is necessarily known. multi_job_interruption_exercised is an informational coverage flag, not an additional pass requirement. No claim of general unknown-outcome reasoning follows from a pass. Protected-stock preservation is an invariant; there is no action to edit the protected bin."
+  ]
+}

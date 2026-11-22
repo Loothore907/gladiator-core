@@ -1,0 +1,28 @@
+suite: marathon
+version: 1
+description: >
+  All four workflow challenges at the marathon level: long tasks (about 90-110 items, 200-380 actions) with
+  several announced mid-task changes and more faults. Tests consistency over long horizons. Expensive: an
+  attempt at high reasoning effort costs much more than an expert attempt.
+
+defaults:
+  max_output_tokens: 8192   # includes reasoning/thinking tokens
+  effort: medium
+  timeout_s: 300
+  difficulty: marathon
+  attempt_time_limit_s: 2700   # 45 min per attempt (default 600 cut marathon attempts short, 2026-11-21)
+
+success:
+  primary: outcome
+  profile: balanced          # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: refund-queue
+    challenge: gladiator/refund-queue@2.2.0
+  - id: access-review
+    challenge: gladiator/access-review@1.2.0
+  - id: incident-triage
+    challenge: gladiator/incident-triage@1.2.0
+  - id: inventory-transfer
+    challenge: gladiator/inventory-transfer@1.2.0

@@ -1,0 +1,20 @@
+suite: frontier
+version: 1
+description: >
+  The frontier track: refund-reconciliation at expert (the payment ledger overrides the order record, and a
+  hidden per-customer quota the agent must keep itself). For probing whether top models can be stumped.
+
+defaults:
+  max_output_tokens: 8192   # includes reasoning/thinking tokens
+  effort: high
+  timeout_s: 240
+  difficulty: expert
+
+success:
+  primary: outcome
+  profile: balanced          # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [passed, task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: refund-reconciliation
+    challenge: gladiator/refund-reconciliation@1.2.0

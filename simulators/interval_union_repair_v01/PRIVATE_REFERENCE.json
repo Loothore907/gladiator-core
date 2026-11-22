@@ -1,0 +1,514 @@
+{
+  "cases": [
+    {
+      "id": "public_overlap",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          0,
+          5,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          3,
+          8,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          8,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "public_disjoint",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          1,
+          3,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          5,
+          9,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          6,
+          2
+        ]
+      ]
+    },
+    {
+      "id": "public_void",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          0,
+          4,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          2,
+          10,
+          "void"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          4,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "public_touching",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          0,
+          2,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          2,
+          4,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          4,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "private_nested_bridge",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          0,
+          10,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          2,
+          3,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          4,
+          5,
+          "active"
+        ],
+        [
+          4,
+          "t",
+          "a",
+          9,
+          12,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          12,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "private_same_start",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          1,
+          4,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          1,
+          9,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          9,
+          11,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          10,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "private_partition",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          0,
+          4,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          3,
+          7,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "b",
+          2,
+          5,
+          "active"
+        ],
+        [
+          4,
+          "u",
+          "a",
+          0,
+          2,
+          "active"
+        ],
+        [
+          5,
+          "u",
+          "a",
+          5,
+          6,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          7,
+          1
+        ],
+        [
+          "t",
+          "b",
+          3,
+          1
+        ],
+        [
+          "u",
+          "a",
+          3,
+          2
+        ]
+      ]
+    },
+    {
+      "id": "private_zero_only",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          2,
+          2,
+          "active"
+        ],
+        [
+          2,
+          "u",
+          "b",
+          0,
+          1,
+          "void"
+        ]
+      ],
+      "expected": []
+    },
+    {
+      "id": "private_large_ticks",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          999990,
+          1000000,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          10,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "private_void_bridge",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          0,
+          2,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          5,
+          7,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          2,
+          5,
+          "void"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          4,
+          2
+        ]
+      ]
+    },
+    {
+      "id": "private_duplicate_interval",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          0,
+          3,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          0,
+          3,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          3,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "private_empty",
+      "rows": [],
+      "expected": []
+    },
+    {
+      "id": "private_scrambled_ids",
+      "rows": [
+        [
+          40,
+          "t",
+          "a",
+          9,
+          12,
+          "active"
+        ],
+        [
+          7,
+          "t",
+          "a",
+          0,
+          10,
+          "active"
+        ],
+        [
+          90,
+          "t",
+          "a",
+          4,
+          5,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          2,
+          3,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          12,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "private_binary_order",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          1,
+          2,
+          "active"
+        ],
+        [
+          2,
+          "T",
+          "a",
+          0,
+          3,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "A",
+          1,
+          5,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "T",
+          "a",
+          3,
+          1
+        ],
+        [
+          "t",
+          "A",
+          4,
+          1
+        ],
+        [
+          "t",
+          "a",
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "private_mixed_zero",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          0,
+          2,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          7,
+          7,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          4,
+          6,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          4,
+          2
+        ]
+      ]
+    }
+  ],
+  "reference_query": "WITH eligible AS (\n SELECT * FROM maintenance_windows WHERE status='active' AND start_tick<end_tick\n), prior AS (\n SELECT *, MAX(end_tick) OVER (PARTITION BY tenant,asset ORDER BY start_tick,end_tick,interval_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previous_end FROM eligible\n), marked AS (\n SELECT *,CASE WHEN previous_end IS NULL OR start_tick>previous_end THEN 1 ELSE 0 END AS new_segment FROM prior\n), grouped AS (\n SELECT *,SUM(new_segment) OVER (PARTITION BY tenant,asset ORDER BY start_tick,end_tick,interval_id ROWS UNBOUNDED PRECEDING) AS segment FROM marked\n), spans AS (\n SELECT tenant,asset,segment,MIN(start_tick) AS lo,MAX(end_tick) AS hi FROM grouped GROUP BY tenant,asset,segment\n)\nSELECT tenant,asset,SUM(hi-lo) AS covered_ticks,COUNT(*) AS segments FROM spans GROUP BY tenant,asset ORDER BY tenant,asset",
+  "status": "operator_only_not_contestant_input"
+}

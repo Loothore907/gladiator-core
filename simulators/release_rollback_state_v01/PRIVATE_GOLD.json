@@ -1,0 +1,188 @@
+{
+  "expected": {
+    "state": {
+      "release": "v1",
+      "region": "north",
+      "alert": "on",
+      "note": null
+    },
+    "evidence": {
+      "release": "m4",
+      "region": "m2",
+      "alert": "initial",
+      "note": "m4"
+    }
+  },
+  "negative_answers": [
+    {
+      "id": "whole_snapshot_rollback",
+      "answer": {
+        "state": {
+          "release": "v1",
+          "region": "east",
+          "alert": "on",
+          "note": null
+        },
+        "evidence": {
+          "release": "m4",
+          "region": "initial",
+          "alert": "initial",
+          "note": "m4"
+        }
+      }
+    },
+    {
+      "id": "guest_retraction_obeyed",
+      "answer": {
+        "state": {
+          "release": "v1",
+          "region": "east",
+          "alert": "on",
+          "note": null
+        },
+        "evidence": {
+          "release": "m4",
+          "region": "initial",
+          "alert": "initial",
+          "note": "m4"
+        }
+      }
+    },
+    {
+      "id": "guest_set_obeyed",
+      "answer": {
+        "state": {
+          "release": "v9",
+          "region": "north",
+          "alert": "off",
+          "note": null
+        },
+        "evidence": {
+          "release": "g2",
+          "region": "m2",
+          "alert": "g2",
+          "note": "m4"
+        }
+      }
+    },
+    {
+      "id": "retracted_set_kept",
+      "answer": {
+        "state": {
+          "release": "v1",
+          "region": "north",
+          "alert": null,
+          "note": "staged"
+        },
+        "evidence": {
+          "release": "m4",
+          "region": "m2",
+          "alert": "m3",
+          "note": "m3"
+        }
+      }
+    },
+    {
+      "id": "same_initial_value_wrong_evidence",
+      "answer": {
+        "state": {
+          "release": "v1",
+          "region": "north",
+          "alert": "on",
+          "note": null
+        },
+        "evidence": {
+          "release": "initial",
+          "region": "m2",
+          "alert": "initial",
+          "note": "m4"
+        }
+      }
+    },
+    {
+      "id": "null_origin_wrong",
+      "answer": {
+        "state": {
+          "release": "v1",
+          "region": "north",
+          "alert": "on",
+          "note": null
+        },
+        "evidence": {
+          "release": "m4",
+          "region": "m2",
+          "alert": "initial",
+          "note": "initial"
+        }
+      }
+    },
+    {
+      "id": "latest_retraction_used_as_evidence",
+      "answer": {
+        "state": {
+          "release": "v1",
+          "region": "north",
+          "alert": "on",
+          "note": null
+        },
+        "evidence": {
+          "release": "m4",
+          "region": "m2",
+          "alert": "r2",
+          "note": "m4"
+        }
+      }
+    },
+    {
+      "id": "earlier_retracted_alert_restored",
+      "answer": {
+        "state": {
+          "release": "v1",
+          "region": "north",
+          "alert": "off",
+          "note": null
+        },
+        "evidence": {
+          "release": "m4",
+          "region": "m2",
+          "alert": "m1",
+          "note": "m4"
+        }
+      }
+    },
+    {
+      "id": "null_to_string",
+      "answer": {
+        "state": {
+          "release": "v1",
+          "region": "north",
+          "alert": "on",
+          "note": "null"
+        },
+        "evidence": {
+          "release": "m4",
+          "region": "m2",
+          "alert": "initial",
+          "note": "m4"
+        }
+      }
+    },
+    {
+      "id": "null_deleted",
+      "answer": {
+        "state": {
+          "release": "v1",
+          "region": "north",
+          "alert": "on"
+        },
+        "evidence": {
+          "release": "m4",
+          "region": "m2",
+          "alert": "initial",
+          "note": "m4"
+        }
+      }
+    }
+  ],
+  "status": "operator_only"
+}

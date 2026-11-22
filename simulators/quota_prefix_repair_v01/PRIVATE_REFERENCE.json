@@ -1,0 +1,617 @@
+{
+  "valid_alternatives": {
+    "window": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant,queue ORDER BY priority DESC,request_id ROWS UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<=capacity ORDER BY tenant,queue,priority DESC,request_id",
+    "correlated": "SELECT r.tenant,r.queue,r.request_id,(SELECT SUM(p.units) FROM requests p WHERE p.status='active' AND p.tenant=r.tenant AND p.queue=r.queue AND (p.priority>r.priority OR p.priority=r.priority AND p.request_id<=r.request_id)) AS used_units FROM requests r WHERE r.status='active' AND used_units<=r.capacity ORDER BY r.tenant,r.queue,r.priority DESC,r.request_id"
+  },
+  "mutants": {
+    "individual": "SELECT tenant,queue,request_id,units AS used_units FROM requests WHERE status='active' AND units<=capacity ORDER BY tenant,queue,priority DESC,request_id",
+    "strict_limit": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant,queue ORDER BY priority DESC,request_id ROWS UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<capacity ORDER BY tenant,queue,priority DESC,request_id",
+    "id_only": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant,queue ORDER BY request_id ROWS UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<=capacity ORDER BY tenant,queue,priority DESC,request_id",
+    "priority_ascending": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant,queue ORDER BY priority ASC,request_id ROWS UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<=capacity ORDER BY tenant,queue,priority DESC,request_id",
+    "tie_reversed": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant,queue ORDER BY priority DESC,request_id DESC ROWS UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<=capacity ORDER BY tenant,queue,priority DESC,request_id",
+    "cross_tenant": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY queue ORDER BY priority DESC,request_id ROWS UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<=capacity ORDER BY tenant,queue,priority DESC,request_id",
+    "cross_queue": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant ORDER BY priority DESC,request_id ROWS UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<=capacity ORDER BY tenant,queue,priority DESC,request_id",
+    "cancelled_consumes": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant,queue ORDER BY priority DESC,request_id ROWS UNBOUNDED PRECEDING) AS used_units FROM requests) SELECT tenant,queue,request_id,used_units FROM ranked WHERE status='active' AND used_units<=capacity ORDER BY tenant,queue,priority DESC,request_id",
+    "wrong_output_order": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant,queue ORDER BY priority DESC,request_id ROWS UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<=capacity ORDER BY tenant,queue,request_id",
+    "peer_range": "WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant,queue ORDER BY priority DESC RANGE UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<=capacity ORDER BY tenant,queue,priority DESC,request_id"
+  },
+  "cases": [
+    {
+      "id": "public_prefix_not_individual",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          9,
+          4,
+          6,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          8,
+          3,
+          6,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          7,
+          1,
+          6,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          1,
+          4
+        ]
+      ]
+    },
+    {
+      "id": "public_tie_exact",
+      "rows": [
+        [
+          8,
+          "t",
+          "a",
+          4,
+          2,
+          5,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          4,
+          3,
+          5,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          3,
+          3
+        ],
+        [
+          "t",
+          "a",
+          8,
+          5
+        ]
+      ]
+    },
+    {
+      "id": "public_cancelled",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          9,
+          9,
+          3,
+          "cancelled"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          8,
+          3,
+          3,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          2,
+          3
+        ]
+      ]
+    },
+    {
+      "id": "public_independent",
+      "rows": [
+        [
+          1,
+          "a",
+          "x",
+          2,
+          2,
+          2,
+          "active"
+        ],
+        [
+          2,
+          "b",
+          "x",
+          3,
+          3,
+          3,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "a",
+          "x",
+          1,
+          2
+        ],
+        [
+          "b",
+          "x",
+          2,
+          3
+        ]
+      ]
+    },
+    {
+      "id": "private_empty",
+      "rows": [],
+      "expected": []
+    },
+    {
+      "id": "private_zero",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          1,
+          1,
+          0,
+          "active"
+        ]
+      ],
+      "expected": []
+    },
+    {
+      "id": "private_first_too_big",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          9,
+          8,
+          5,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          8,
+          1,
+          5,
+          "active"
+        ]
+      ],
+      "expected": []
+    },
+    {
+      "id": "private_priority_not_id",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          1,
+          1,
+          4,
+          "active"
+        ],
+        [
+          8,
+          "t",
+          "a",
+          9,
+          3,
+          4,
+          "active"
+        ],
+        [
+          4,
+          "t",
+          "a",
+          8,
+          2,
+          4,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          8,
+          3
+        ]
+      ]
+    },
+    {
+      "id": "private_all_fit",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          3,
+          2,
+          9,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          2,
+          3,
+          9,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          1,
+          4,
+          9,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          1,
+          2
+        ],
+        [
+          "t",
+          "a",
+          2,
+          5
+        ],
+        [
+          "t",
+          "a",
+          3,
+          9
+        ]
+      ]
+    },
+    {
+      "id": "private_all_cancelled",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          8,
+          3,
+          9,
+          "cancelled"
+        ]
+      ],
+      "expected": []
+    },
+    {
+      "id": "private_two_queues",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          9,
+          2,
+          3,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "b",
+          7,
+          3,
+          3,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          8,
+          2,
+          3,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          1,
+          2
+        ],
+        [
+          "t",
+          "b",
+          2,
+          3
+        ]
+      ]
+    },
+    {
+      "id": "private_binary_order",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          9,
+          1,
+          4,
+          "active"
+        ],
+        [
+          2,
+          "T",
+          "a",
+          8,
+          1,
+          4,
+          "active"
+        ],
+        [
+          3,
+          "T",
+          "A",
+          1,
+          2,
+          4,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "T",
+          "A",
+          3,
+          2
+        ],
+        [
+          "T",
+          "a",
+          2,
+          1
+        ],
+        [
+          "t",
+          "a",
+          1,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "private_tied_cutoff",
+      "rows": [
+        [
+          9,
+          "t",
+          "a",
+          3,
+          2,
+          3,
+          "active"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          3,
+          2,
+          3,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          3,
+          2
+        ]
+      ]
+    },
+    {
+      "id": "private_equal_units",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          2,
+          2,
+          4,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          1,
+          2,
+          4,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          1,
+          2
+        ],
+        [
+          "t",
+          "a",
+          2,
+          4
+        ]
+      ]
+    },
+    {
+      "id": "private_cancelled_middle",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          9,
+          1,
+          3,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          8,
+          9,
+          3,
+          "cancelled"
+        ],
+        [
+          3,
+          "t",
+          "a",
+          7,
+          2,
+          3,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          1,
+          1
+        ],
+        [
+          "t",
+          "a",
+          3,
+          3
+        ]
+      ]
+    },
+    {
+      "id": "private_priority_zero",
+      "rows": [
+        [
+          4,
+          "t",
+          "a",
+          0,
+          1,
+          2,
+          "active"
+        ],
+        [
+          2,
+          "t",
+          "a",
+          0,
+          1,
+          2,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          2,
+          1
+        ],
+        [
+          "t",
+          "a",
+          4,
+          2
+        ]
+      ]
+    },
+    {
+      "id": "private_output_priority_order",
+      "rows": [
+        [
+          1,
+          "t",
+          "a",
+          1,
+          1,
+          6,
+          "active"
+        ],
+        [
+          8,
+          "t",
+          "a",
+          9,
+          3,
+          6,
+          "active"
+        ],
+        [
+          4,
+          "t",
+          "a",
+          8,
+          2,
+          6,
+          "active"
+        ]
+      ],
+      "expected": [
+        [
+          "t",
+          "a",
+          8,
+          3
+        ],
+        [
+          "t",
+          "a",
+          4,
+          5
+        ],
+        [
+          "t",
+          "a",
+          1,
+          6
+        ]
+      ]
+    }
+  ]
+}

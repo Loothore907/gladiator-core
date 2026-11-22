@@ -1,0 +1,122 @@
+{
+  "case_id": "optimistic-transaction-state",
+  "case_version": "0.1.0",
+  "goal": "Compute the final committed state, revision, evidence, open transactions and commit-attempt results from this fictional log. Do not execute real transactions.",
+  "rules": [
+    "Process events in listed order. Initial revision is 4.",
+    "begin creates an open transaction with base_revision equal to current committed revision and an empty patch. Transaction IDs are unique.",
+    "stage merges fields into that transaction patch; a later stage for a field replaces its earlier staged value. Staging never changes committed state or field evidence. null is an explicit value, not deletion.",
+    "commit compares transaction base_revision with current committed revision. If unequal, append a conflict result with unchanged revision; no patch is applied, and the transaction remains open with its patch and base unchanged.",
+    "If equal, commit atomically merges its entire patch, increments revision by one even if all values are unchanged, updates evidence for every explicitly patched field to that commit EVENT id, appends a committed result with the NEW revision, and closes the transaction.",
+    "rebase changes only an open transaction base_revision to the current revision; its existing patch is preserved. It does not change committed state or revision.",
+    "abort closes and discards the transaction without changing state, evidence or revision.",
+    "Final open transactions are reported, including their base revision and complete patch. They do not implicitly commit.",
+    "All events are structurally valid and reference existing open transactions where required. No hidden events. Object key order is irrelevant; commit_results list follows event order.",
+    "Single JSON answer, <=8192 UTF-8 bytes, depth <=32, no duplicate fields or floats. Exact required fields; revisions must be integers, not booleans. No tools or code execution are required. One submission, no repair loop.",
+    "Answer bounds: revision/base_revision/result revision 0..132; event/transaction/evidence identifiers 1..32 characters; state and patch strings at most64 characters; pending and commit_results at most32 entries. Patch fields are only release,region,note."
+  ],
+  "answer_schema": {
+    "state": "exactly release,region,note: string or null",
+    "revision": "integer",
+    "evidence": "same fields, each last successful explicit commit event ID or initial",
+    "pending": "object keyed by open transaction ID, each exactly base_revision integer and patch object",
+    "commit_results": "list of exactly {event,result,revision}; result committed or conflict; only commit attempts included"
+  },
+  "data": {
+    "initial_revision": 4,
+    "initial": {
+      "release": "v1",
+      "region": "east",
+      "note": null
+    },
+    "events": [
+      {
+        "id": "e1",
+        "op": "begin",
+        "tx": "a"
+      },
+      {
+        "id": "e2",
+        "op": "stage",
+        "tx": "a",
+        "patch": {
+          "release": "v2",
+          "region": "west"
+        }
+      },
+      {
+        "id": "e3",
+        "op": "begin",
+        "tx": "b"
+      },
+      {
+        "id": "e4",
+        "op": "stage",
+        "tx": "b",
+        "patch": {
+          "region": "west",
+          "note": "ready"
+        }
+      },
+      {
+        "id": "e5",
+        "op": "commit",
+        "tx": "a"
+      },
+      {
+        "id": "e6",
+        "op": "commit",
+        "tx": "b"
+      },
+      {
+        "id": "e7",
+        "op": "rebase",
+        "tx": "b"
+      },
+      {
+        "id": "e8",
+        "op": "stage",
+        "tx": "b",
+        "patch": {
+          "note": null
+        }
+      },
+      {
+        "id": "e9",
+        "op": "commit",
+        "tx": "b"
+      },
+      {
+        "id": "e10",
+        "op": "begin",
+        "tx": "c"
+      },
+      {
+        "id": "e11",
+        "op": "stage",
+        "tx": "c",
+        "patch": {
+          "release": "v9"
+        }
+      },
+      {
+        "id": "e12",
+        "op": "abort",
+        "tx": "c"
+      },
+      {
+        "id": "e13",
+        "op": "begin",
+        "tx": "d"
+      },
+      {
+        "id": "e14",
+        "op": "stage",
+        "tx": "d",
+        "patch": {
+          "region": "north"
+        }
+      }
+    ]
+  }
+}

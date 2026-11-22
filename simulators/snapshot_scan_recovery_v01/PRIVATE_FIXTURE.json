@@ -1,0 +1,32 @@
+{
+  "initial": {
+    "a": {
+      "stock": 1,
+      "minimum": 3
+    },
+    "b": {
+      "stock": 5,
+      "minimum": 2
+    },
+    "c": {
+      "stock": 2,
+      "minimum": 4
+    },
+    "d": {
+      "stock": 6,
+      "minimum": 3
+    },
+    "e": {
+      "stock": 1,
+      "minimum": 1
+    },
+    "f": {
+      "stock": 0,
+      "minimum": 2
+    }
+  },
+  "refresh": {
+    "a": 8,
+    "d": 0
+  }
+}

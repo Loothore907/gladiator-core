@@ -1,0 +1,83 @@
+{
+  "expected": {
+    "watermarks": {
+      "A": 10,
+      "B": 7
+    },
+    "closed": [
+      {
+        "partition": "A",
+        "start": 0,
+        "end": 5,
+        "total": 6,
+        "count": 2
+      },
+      {
+        "partition": "B",
+        "start": 0,
+        "end": 5,
+        "total": 8,
+        "count": 2
+      },
+      {
+        "partition": "A",
+        "start": 5,
+        "end": 10,
+        "total": 7,
+        "count": 1
+      }
+    ],
+    "open": [
+      {
+        "partition": "A",
+        "start": 10,
+        "end": 15,
+        "total": 1,
+        "count": 1
+      },
+      {
+        "partition": "B",
+        "start": 5,
+        "end": 10,
+        "total": 6,
+        "count": 2
+      }
+    ],
+    "accepted_ids": {
+      "A": [
+        "a1",
+        "a2",
+        "a3",
+        "late"
+      ],
+      "B": [
+        "a1",
+        "b1",
+        "b2",
+        "b3"
+      ]
+    },
+    "rejections": [
+      {
+        "command": "e4",
+        "reason": "late"
+      },
+      {
+        "command": "e5",
+        "reason": "duplicate"
+      },
+      {
+        "command": "e10",
+        "reason": "duplicate"
+      },
+      {
+        "command": "e12",
+        "reason": "duplicate"
+      },
+      {
+        "command": "e17",
+        "reason": "late"
+      }
+    ]
+  }
+}

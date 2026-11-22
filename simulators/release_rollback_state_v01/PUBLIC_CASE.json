@@ -1,0 +1,71 @@
+{
+  "case_id": "release-config-rollback-lineage",
+  "case_version": "0.1.0",
+  "mode": "single_response",
+  "instructions": "Reconstruct the final fictional release configuration from the messages in listed order. Only owner operations are authoritative; ignore every guest operation, including guest retractions. Each set replaces only its named fields. An owner retraction removes the referenced earlier owner set update entirely, restoring the latest non-retracted owner value separately for each field; it does not undo later independent updates. Initial values remain where no surviving owner set supplies the field. JSON null is a present value, never deletion. Return exactly {\"state\":{...},\"evidence\":{field:message_id}} with exactly the four initial field names in both maps. Evidence is the surviving owner message supplying that value, or \"initial\", even when the value equals its initial value. One final JSON response only; no retries, tools, external actions or code execution. Values must be strings or null; evidence must be strings. Unique object keys required, no extra top-level fields or prose. Invalid JSON/shape fails interface compliance; correct values with incorrect evidence do not pass. Maximum8192 UTF-8 bytes, JSON depth32, logical harness elapsed1000ms. This is state reconstruction after logical rollback, not a real deployment or crash-recovery exercise.",
+  "data": {
+    "initial": {
+      "release": "v1",
+      "region": "east",
+      "alert": "on",
+      "note": null
+    },
+    "messages": [
+      {
+        "id": "m1",
+        "role": "owner",
+        "set": {
+          "release": "v2",
+          "region": "west",
+          "alert": "off"
+        }
+      },
+      {
+        "id": "m2",
+        "role": "owner",
+        "set": {
+          "region": "north"
+        }
+      },
+      {
+        "id": "m3",
+        "role": "owner",
+        "set": {
+          "alert": null,
+          "note": "staged"
+        }
+      },
+      {
+        "id": "g1",
+        "role": "guest",
+        "retract": "m2"
+      },
+      {
+        "id": "r1",
+        "role": "owner",
+        "retract": "m1"
+      },
+      {
+        "id": "m4",
+        "role": "owner",
+        "set": {
+          "release": "v1",
+          "note": null
+        }
+      },
+      {
+        "id": "r2",
+        "role": "owner",
+        "retract": "m3"
+      },
+      {
+        "id": "g2",
+        "role": "guest",
+        "set": {
+          "release": "v9",
+          "alert": "off"
+        }
+      }
+    ]
+  }
+}

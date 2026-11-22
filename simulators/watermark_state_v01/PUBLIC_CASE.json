@@ -1,0 +1,166 @@
+{
+  "case_id": "partition-watermark-state",
+  "case_version": "0.1.0",
+  "goal": "Compute final fictional stream aggregation state and rejection ledger. No real streaming service is used.",
+  "rules": [
+    "Process commands in listed arrival order, not sorted by event time. Partitions A and B have independent initial watermark0 and empty state.",
+    "For ingest, first check whether sample_id was previously ACCEPTED in that same partition. If yes reject as duplicate regardless of timestamp or amount. Accepted IDs remain remembered after their windows close.",
+    "If not duplicate and event time is strictly less than that partition current watermark, reject as late. Equality is accepted. A rejected sample does NOT reserve its ID, so that ID can be accepted later.",
+    "Otherwise accept the sample, remember its ID, and add amount and one count to its partition window. Width is5 ticks: start=5*floor(time/5), end=start+5, interval[start,end).",
+    "watermark updates only its named partition. Watermarks never decrease; repeated equal values are allowed. Emit and remove every existing nonempty window in that partition whose end<=new watermark, in ascending start order. Do not emit empty windows.",
+    "Append emitted windows to closed in global command/emission order. No implicit watermark advance, flush or closure occurs at end of input. An event can be late even if its window remains open.",
+    "Answer exactly watermarks,closed,open,accepted_ids,rejections. watermarks and accepted_ids are objects with exactly A and B. closed/open are lists of {partition,start,end,total,count}; open sorted by partition then start. accepted_ids values are sorted unique sample-ID lists. rejections is ordered {command,reason}, reason duplicate or late.",
+    "All integers in answers are ordinary JSON integers, never booleans/floats: times0..100, totals0..3200, counts0..32. Lists at most32 entries. Identifiers nonempty ASCII alphanumeric/underscore/hyphen1..32chars; partition A or B. Window rows have positive total/count and end=start+5.",
+    "One JSON answer line,<=8192UTF-8 bytes,depth<=32,no duplicate keys, exact required fields. One submission with no repair loop. All commands are valid and public. This tests single-answer state reasoning, not interactive streaming or real event processing.",
+    "Input bounds: at most32 commands; ingest times0..95, watermark times0..100, amounts1..100. Thus all window endpoints fit0..100."
+  ],
+  "data": {
+    "window_width": 5,
+    "initial_watermarks": {
+      "A": 0,
+      "B": 0
+    },
+    "commands": [
+      {
+        "command": "e1",
+        "op": "ingest",
+        "partition": "A",
+        "sample_id": "a1",
+        "time": 1,
+        "amount": 2
+      },
+      {
+        "command": "e2",
+        "op": "ingest",
+        "partition": "B",
+        "sample_id": "b1",
+        "time": 1,
+        "amount": 5
+      },
+      {
+        "command": "e3",
+        "op": "watermark",
+        "partition": "A",
+        "time": 3
+      },
+      {
+        "command": "e4",
+        "op": "ingest",
+        "partition": "A",
+        "sample_id": "late",
+        "time": 2,
+        "amount": 9
+      },
+      {
+        "command": "e5",
+        "op": "ingest",
+        "partition": "A",
+        "sample_id": "a1",
+        "time": 8,
+        "amount": 100
+      },
+      {
+        "command": "e6",
+        "op": "ingest",
+        "partition": "A",
+        "sample_id": "late",
+        "time": 3,
+        "amount": 4
+      },
+      {
+        "command": "e7",
+        "op": "ingest",
+        "partition": "B",
+        "sample_id": "a1",
+        "time": 4,
+        "amount": 3
+      },
+      {
+        "command": "e8",
+        "op": "watermark",
+        "partition": "A",
+        "time": 5
+      },
+      {
+        "command": "e9",
+        "op": "ingest",
+        "partition": "A",
+        "sample_id": "a2",
+        "time": 5,
+        "amount": 7
+      },
+      {
+        "command": "e10",
+        "op": "ingest",
+        "partition": "A",
+        "sample_id": "late",
+        "time": 9,
+        "amount": 50
+      },
+      {
+        "command": "e11",
+        "op": "watermark",
+        "partition": "B",
+        "time": 5
+      },
+      {
+        "command": "e12",
+        "op": "ingest",
+        "partition": "B",
+        "sample_id": "b1",
+        "time": 0,
+        "amount": 1
+      },
+      {
+        "command": "e13",
+        "op": "ingest",
+        "partition": "B",
+        "sample_id": "b2",
+        "time": 5,
+        "amount": 2
+      },
+      {
+        "command": "e14",
+        "op": "watermark",
+        "partition": "A",
+        "time": 10
+      },
+      {
+        "command": "e15",
+        "op": "ingest",
+        "partition": "A",
+        "sample_id": "a3",
+        "time": 12,
+        "amount": 1
+      },
+      {
+        "command": "e16",
+        "op": "watermark",
+        "partition": "B",
+        "time": 7
+      },
+      {
+        "command": "e17",
+        "op": "ingest",
+        "partition": "B",
+        "sample_id": "b3",
+        "time": 6,
+        "amount": 6
+      },
+      {
+        "command": "e18",
+        "op": "ingest",
+        "partition": "B",
+        "sample_id": "b3",
+        "time": 7,
+        "amount": 4
+      },
+      {
+        "command": "e19",
+        "op": "watermark",
+        "partition": "A",
+        "time": 10
+      }
+    ]
+  }
+}

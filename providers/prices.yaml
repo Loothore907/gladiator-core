@@ -1,0 +1,63 @@
+# USD per 1 million tokens. The $ cap can only be enforced for models listed here,
+# so a match will not start with an unlisted model. Add it below first.
+#
+#   input:         normal input tokens
+#   cached_input:  input tokens served from the provider's cache (optional; defaults to input)
+#   output:        output tokens, INCLUDING reasoning/thinking tokens
+#
+# Check prices against the provider's pricing page before a big run.
+# Sources: Anthropic list prices as of 2026-11-03; OpenAI rates are the ones v1
+# used for its Nov 14 match (readiness/price_evidence.json in archive/v1).
+
+anthropic:
+  # cache_write: Anthropic bills prompt-cache writes (5-minute cache) at 1.25x the input price. Models with no
+  # cached_input listed bill cache reads at the full input price here (overstates cost; safe for the cap).
+  claude-fable-5-2:  {input: 8.00,  cached_input: 0.20, cache_write: 10.00, output: 40.00}
+  claude-opus-5-5:   {input: 4.00,  cached_input: 0.20, cache_write: 5.00,  output: 20.00}
+  claude-sonnet-5-5: {input: 2.00,  cached_input: 0.10, cache_write: 2.50,  output: 10.00}
+  claude-haiku-5-5:  {input: 0.10,  cache_write: 0.125, output: 0.50}
+  claude-opus-4-8:   {input: 5.00,  cache_write: 6.25,  output: 25.00}
+  claude-sonnet-4-6: {input: 3.00,  cache_write: 3.75,  output: 15.00}
+  claude-haiku-4-5-20251001: {input: 1.00, cache_write: 1.25, output: 5.00}   # the only Haiku 4.5 ID this key serves
+
+openai:
+  # Checked 2026-11-20 against https://developers.openai.com/api/docs/pricing (standard tier, prompts
+  # up to 272K tokens; longer prompts cost more, and Gladiator prompts are far below that).
+  gpt-6.2-astra: {input: 8.00, cached_input: 0.40, output: 40.00}
+  gpt-6.2-sol:   {input: 2.00, cached_input: 0.10, output: 10.00}
+  gpt-6-astra:   {input: 10.00, cached_input: 1.00, output: 50.00}
+  gpt-6.1-sol:   {input: 2.00, cached_input: 0.10, output: 10.00}
+  gpt-6.1-terra: {input: 1.00, cached_input: 0.05, output: 5.00}
+  gpt-6-sol:     {input: 2.00, cached_input: 0.20, output: 10.00}
+  gpt-6-luna:    {input: 0.10, cached_input: 0.01, output: 0.50}
+  gpt-5.6-terra: {input: 2.00, cached_input: 0.20, output: 12.00}
+  gpt-5.6-luna:  {input: 0.20, cached_input: 0.02, output: 1.20}
+  # gpt-5.6-sol: promotional price until 2026-11-30, regular price not published; not listed
+
+google:
+  # Paid-tier prices, checked 2026-11-20 against https://aistudio.google.com/docs/pricing
+  # (output prices there include thinking tokens). Dated changes are applied automatically (until/then).
+  # cached_input: Standard-tier context-caching price, rechecked 2026-11-21 (Gemini 4: implicit caching only,
+  # applied automatically; storage fees apply to explicit caches, which Gladiator doesn't create).
+  # Flash tier
+  gemini-3.1-flash-lite: {input: 0.25, cached_input: 0.025, output: 1.50}
+  gemini-3.5-flash-lite: {input: 0.30, cached_input: 0.03, output: 2.50}
+  gemini-3.8-flash: {input: 0.75, cached_input: 0.075, output: 3.75, until: 2026-12-31, then: {input: 1.50, cached_input: 0.15, output: 7.50}}
+  gemini-3.6-flash: {input: 0.75, cached_input: 0.075, output: 3.75, until: 2026-12-31, then: {input: 1.50, cached_input: 0.15, output: 7.50}}
+  gemini-3.5-flash: {input: 1.50, output: 9.00}   # UNVERIFIED: not on Google's pricing page; third-party trackers only
+  # Pro and Gemini 4
+  gemini-2.5-pro: {input: 1.25, output: 10.00, until: 2026-11-30, then: retired}   # <=200k-token prompts; routed to 3.8 Flash from Dec 1
+  gemini-4-hydrogen: {input: 1.50, cached_input: 0.075, output: 7.50}
+  gemini-4-argon: {input: 2.00, cached_input: 0.10, output: 10.00, until: 2026-11-30, then: {input: 4.00, cached_input: 0.20, output: 20.00}}
+  gemini-4-carbon: {input: 2.00, cached_input: 0.10, output: 10.00, until: 2026-11-30, then: {input: 4.00, cached_input: 0.20, output: 20.00}}
+  gemini-4-neon: {input: 3.00, cached_input: 0.15, output: 15.00}
+  # Not listed on purpose:
+  #   gemini-3.7-flash: deprecated alias that silently runs gemini-3.8-flash (a match would mislabel the model)
+  #   gemini-3-flash: not served to this key under that ID
+  #   gemini-2.5-flash-lite: retired for new users
+
+scripted:
+  golden:  {input: 0, output: 0}
+  invalid: {input: 0, output: 0}
+  silent:  {input: 0, output: 0}
+  outage:  {input: 0, output: 0}

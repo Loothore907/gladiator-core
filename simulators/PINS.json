@@ -1,0 +1,156 @@
+{
+  "snapshot_scan_recovery_v01": {
+    "entry": "snapshot_scan_recovery_v01/case.py",
+    "kind": "native",
+    "max_actions": 16,
+    "v1_output_tokens": 1024,
+    "sha256": {
+      "snapshot_scan_recovery_v01/INPUT_FREEZE.json": "bab0961fc3232bf9c8449d428237e284f8bd9bb2d0e82b398cefd6531d1abbf2",
+      "snapshot_scan_recovery_v01/PRIVATE_FIXTURE.json": "9208af7be39b531e26cf15697958d57d181ba3af4f40c1ae06b55030489f32ba",
+      "snapshot_scan_recovery_v01/PUBLIC_CASE.json": "8ac3de1208d9db53d8eb58531f053827979699bc022ffb5fdfbe2c65e2f9d004",
+      "snapshot_scan_recovery_v01/case.py": "beebaadca6a5a8e55663ad67715acb65dd98cce70dfe04d677b28b840497bc86",
+      "snapshot_scan_recovery_v01/json_contract.py": "1c5a4bd673283db8bac91cabed04568032f88c08f1801be5200d9d28f945e4f1",
+      "snapshot_scan_recovery_v01/play.py": "40b36de1f830e0fb7654dfd50b5263ccc38ee4709e814340202e1d38c4ab035d"
+    }
+  },
+  "interval_union_repair_v01": {
+    "entry": "interval_operational_v02/case_bridge.py",
+    "kind": "bridge",
+    "max_actions": 10,
+    "v1_output_tokens": 1024,
+    "sha256": {
+      "interval_union_repair_v01/INPUT_FREEZE.json": "9e56b612c944ad02e4fae877f1c53b4101e35999d548afff2a2b10db3f1796e6",
+      "interval_union_repair_v01/PRIVATE_REFERENCE.json": "78120481d609a908eb75bd7e168f8ceffa45b202867ba66e88e042eadad7c854",
+      "interval_union_repair_v01/PUBLIC_INPUT.json": "04cf387947ea11c3aa6f2c8f1052dddf7813910ff4ec4b1418c9863388bde2cb",
+      "interval_union_repair_v01/coding_session.py": "588067e45106fc74be4057f888df56942e22e5400e9e5c4351f243daf2c72d92",
+      "interval_union_repair_v01/play_case.py": "89f475cf53934bbc5b99ffb26b57fb94d247ab3ef70df233517148406f892937",
+      "interval_union_repair_v01/sql_executor.py": "c052fa95dec7fe8c9465a67ee611c56d8176cbe5a189fe68de9a4def1cf6028a",
+      "interval_operational_v02/case_bridge.py": "94da6156cdf5280a6fe22851376a13e93101111d45803baea23bfc0871389854"
+    }
+  },
+  "dependency_reachability_repair_v01": {
+    "entry": "graph_operational_v01/case_bridge.py",
+    "kind": "bridge",
+    "max_actions": 10,
+    "v1_output_tokens": 1024,
+    "sha256": {
+      "dependency_reachability_repair_v01/INPUT_FREEZE.json": "f28ba161f4a4a2c38bc29be8ffaf4d77dbed533a59092241e46abd1142e90911",
+      "dependency_reachability_repair_v01/PRIVATE_REFERENCE.json": "55291420b209512166c45904827f2b139f83f623d9dfe0a0f02fee18b53cc219",
+      "dependency_reachability_repair_v01/PUBLIC_INPUT.json": "2b6ba2bd564deec04224516fa076dcdbf2e567637ee3128a7b1043578bd7b1d9",
+      "dependency_reachability_repair_v01/json_contract.py": "1c5a4bd673283db8bac91cabed04568032f88c08f1801be5200d9d28f945e4f1",
+      "dependency_reachability_repair_v01/oracle.py": "e7cf73e1d32cb013e3293fb7d23c47b7d0ad53eb332e6058c77c9115276d3d64",
+      "dependency_reachability_repair_v01/play.py": "d2d13fa34fcd890fdc1286d9987c98cca7b737b6299c7e6e34905711f1aa2a00",
+      "dependency_reachability_repair_v01/session.py": "363b60cf5efbd8ae835234479ea1379fa438d215b9d1a715a2572459e55652b8",
+      "dependency_reachability_repair_v01/sql_executor.py": "d5210619d4d37b03b22ff808ffd7dd90aca1d9e40caa2e4e6530cf8db9973d1d",
+      "graph_operational_v01/case_bridge.py": "d7ed155996fe9525ab96aa4ffea257696b8b1135c93cfd2327f2a4b5cd13c1f4"
+    }
+  },
+  "quota_prefix_repair_v01": {
+    "entry": "quota_operational_v01/case_bridge.py",
+    "kind": "bridge",
+    "max_actions": 10,
+    "v1_output_tokens": 1024,
+    "sha256": {
+      "quota_prefix_repair_v01/INPUT_FREEZE.json": "e962495d4c3d43bffae8291eac18070aae7d0064a5e7b3030170588995d753b7",
+      "quota_prefix_repair_v01/PRIVATE_REFERENCE.json": "10a28a4f72e6429a05323f1603f05d250dbb91ddd60d2e10807bcf0a14d69f83",
+      "quota_prefix_repair_v01/PUBLIC_INPUT.json": "7261abeaf571d78366858a59401f57994e83add8d468ade2fd88cadb486b86f6",
+      "quota_prefix_repair_v01/json_contract.py": "1c5a4bd673283db8bac91cabed04568032f88c08f1801be5200d9d28f945e4f1",
+      "quota_prefix_repair_v01/oracle.py": "e7cf73e1d32cb013e3293fb7d23c47b7d0ad53eb332e6058c77c9115276d3d64",
+      "quota_prefix_repair_v01/play.py": "d2d13fa34fcd890fdc1286d9987c98cca7b737b6299c7e6e34905711f1aa2a00",
+      "quota_prefix_repair_v01/session.py": "32bac75cabb0213902426daba36cfd9303c8e7d175e44483ed3ef067cf5b4a07",
+      "quota_prefix_repair_v01/sql_executor.py": "7292aa00da29c15e78c1143d165e12ccc9f89df3716d13477f027ffa7ef6fea2",
+      "quota_operational_v01/case_bridge.py": "2ab94088bca28ce8336e762b529b95d65cf64f126107414ec50dc87272b7ab05"
+    }
+  },
+  "ticket_revocation_recovery_v01": {
+    "entry": "ticket_operational_v02/case_bridge.py",
+    "kind": "bridge",
+    "max_actions": 14,
+    "v1_output_tokens": 512,
+    "sha256": {
+      "ticket_revocation_recovery_v01/INPUT_FREEZE.json": "a42e93a455b1bf8bafe05794673cd5c163e158b51b1f4b7fdc4d79244df4bd41",
+      "ticket_revocation_recovery_v01/PRIVATE_FIXTURE.json": "c09e9095db9a3b292282ecdaf9745eb57b7b7d9c30db7fdb912ecccfc7b69ef3",
+      "ticket_revocation_recovery_v01/PUBLIC_CASE.json": "951416c84a1189ee7ab8095ae51f82e3fdc2f4bdaa1206d2132698b53536c4a7",
+      "ticket_revocation_recovery_v01/action_seam.py": "7623cfd3c7215a1ae1bf06db18c79974cf1c4b78c3491c9f7b345e0df7f59727",
+      "ticket_revocation_recovery_v01/case.py": "560548ce898f88174e5b6e32ed4d00bd67e70d81a3ca8e89187364e151c564f8",
+      "ticket_revocation_recovery_v01/json_contract.py": "1c5a4bd673283db8bac91cabed04568032f88c08f1801be5200d9d28f945e4f1",
+      "ticket_revocation_recovery_v01/play.py": "40f61bf9c85fe382bc090346260c45142f89067a4d1eaa9e703d37777978baf2",
+      "ticket_operational_v02/case_bridge.py": "6368aa6fa35476905f6f98f91fbb3ae0a9ed18456d5f9ea59a276db115aaef79"
+    }
+  },
+  "transaction_state_v01": {
+    "entry": "transaction_operational_v01/case_bridge.py",
+    "kind": "bridge",
+    "max_actions": 1,
+    "v1_output_tokens": 2048,
+    "sha256": {
+      "transaction_state_v01/case.py": "84114b1531cd961f0a7266de005a97234e9888d982eb5e83a2922edae9a91126",
+      "transaction_state_v01/transaction_seam.py": "a099d44adb11f2474f4948a8f5924c1b69241b4b87ddb0441b1dad5f0241c045",
+      "transaction_state_v01/json_contract.py": "1c5a4bd673283db8bac91cabed04568032f88c08f1801be5200d9d28f945e4f1",
+      "transaction_state_v01/play.py": "7d64689d819483e48bc07c92498304a8738e742ceb47c2fc36f9dc74c16c6c70",
+      "transaction_state_v01/INPUT_FREEZE.json": "5be43a6436dade89b99e79db93018b2ebcf25f553d780a96a98dd0aa7d16f6de",
+      "transaction_state_v01/PUBLIC_CASE.json": "ff83e12682722dbc2ec21c533ed36509c7810d90d95f9ccc742fe88c85059221",
+      "transaction_state_v01/PRIVATE_GOLD.json": "76c566b55669f5005866373fc1f49c7929e592b4fc4d5c9ddef6b4057e3a1492",
+      "transaction_operational_v01/case_bridge.py": "b3406cfdaa1fc92310ec65b4b232e24730500de80f029b1e223f286edc2c795c"
+    }
+  },
+  "release_plan_author_v01": {
+    "entry": "release_plan_operational_v01/case_bridge.py",
+    "kind": "bridge",
+    "max_actions": 1,
+    "v1_output_tokens": 2048,
+    "sha256": {
+      "release_plan_author_v01/case.py": "cd13bfcd66570bc49bed323c48c531718d00c6696f68434e307060f2a468e3b3",
+      "release_plan_author_v01/json_contract.py": "1c5a4bd673283db8bac91cabed04568032f88c08f1801be5200d9d28f945e4f1",
+      "release_plan_author_v01/play.py": "1d41f16f50e8110972ba6892e5984eba360ab36f49245e223b49bd6c032e798d",
+      "release_plan_author_v01/INPUT_FREEZE.json": "3bb875a4962f657b23fafd80fa3e91c2b723ac3e3c500ba35b46c241a1544620",
+      "release_plan_author_v01/PUBLIC_CASE.json": "710fce65c2f888437f8bdb5ece5d7350b38d9ec2b0ee227d766010dad1f50cca",
+      "release_plan_operational_v01/case_bridge.py": "78e10d0615eee53c93115b0e5115e2112cac52c5826c1ccabfe23a1a3658ae81"
+    }
+  },
+  "release_rollback_state_v01": {
+    "entry": "nine_case_offline_v01/rollback_bridge.py",
+    "kind": "bridge",
+    "max_actions": 1,
+    "v1_output_tokens": 2048,
+    "sha256": {
+      "release_rollback_state_v01/case.py": "2b0f01fd08d15edc21ba244caaa9362b8be4577bf44989a16a8cfc1f391e2da0",
+      "release_rollback_state_v01/json_contract.py": "1c5a4bd673283db8bac91cabed04568032f88c08f1801be5200d9d28f945e4f1",
+      "release_rollback_state_v01/play.py": "d0dd096caab882ebe27870f4363293ec038e8f419213e72ca7578453adf057ca",
+      "release_rollback_state_v01/PUBLIC_CASE.json": "8749cae1b7cd233ead36d69cc24a09822cb6b6d3fcc52b5442aade017262ef6c",
+      "release_rollback_state_v01/PRIVATE_GOLD.json": "f8d02789445cf8ecd1e03fdf837c13593cd29487f197831b76244f917bd8e76d",
+      "release_rollback_state_v01/state_seam.py": "f5eb0df05810ec668c7cb1785940e74db6d97029f9f634a86d587c3e9eb0ca08",
+      "nine_case_offline_v01/rollback_bridge.py": "30e9ed97872fdf48533f0a2e74cfb4a84d8795698892b7a876fa9ed0c572d3c9"
+    }
+  },
+  "watermark_state_v01": {
+    "entry": "nine_case_offline_v01/watermark_bridge.py",
+    "kind": "bridge",
+    "max_actions": 1,
+    "v1_output_tokens": 2048,
+    "sha256": {
+      "watermark_state_v01/case.py": "e80e9c384b0c3408183678c1205a8c9968b90ebb5f62348b515d6cbf25521d02",
+      "watermark_state_v01/json_contract.py": "1c5a4bd673283db8bac91cabed04568032f88c08f1801be5200d9d28f945e4f1",
+      "watermark_state_v01/play.py": "b30394a89b238f150b0cfbbface6b452a4be3c225135af4aa18c196a2a266ef6",
+      "watermark_state_v01/PUBLIC_CASE.json": "f7186a89a79af782bea1e836b5fcf518a2c7deae8e29311cc4d7f91b9d961a57",
+      "watermark_state_v01/PRIVATE_GOLD.json": "7e3fb34a566fdef4b7f66289c0668879cf25165a6434555daaf4d3f5de3b425d",
+      "watermark_state_v01/stream_seam.py": "f6398e08d5bda323ddb79c832321865e6eaa9ce56cd7fa35591e194e3defd737",
+      "watermark_state_v01/INPUT_FREEZE.json": "e1f4ed7ce108df7868a2cf835645b36652912b5fdde5e9038f51f913a29fce89",
+      "nine_case_offline_v01/watermark_bridge.py": "66fcfb63664b2fb76a001d3bc6cbd6f19741edd71ade6777646c8e19251a41d6"
+    }
+  },
+  "batch_checkpoint_recovery_v01": {
+    "entry": "batch_checkpoint_recovery_v01/case.py",
+    "kind": "native",
+    "max_actions": 16,
+    "v1_output_tokens": 1024,
+    "sha256": {
+      "batch_checkpoint_recovery_v01/case.py": "c3784ef73369aa0c9102e530ea6590b5f6927459f15933c4563ce7a7cb0de964",
+      "batch_checkpoint_recovery_v01/json_contract.py": "1c5a4bd673283db8bac91cabed04568032f88c08f1801be5200d9d28f945e4f1",
+      "batch_checkpoint_recovery_v01/play.py": "f6d9b3e5e32d495698bda1347f46945df0d2a26b5b6d4c8748c177a64f80864e",
+      "batch_checkpoint_recovery_v01/PUBLIC_CASE.json": "0530e84b6dca0e382da719006bc729b4c9200f303237b92e4a5a6d1f56d30fba",
+      "batch_checkpoint_recovery_v01/PRIVATE_FIXTURE.json": "2559b81bceccb376d5f784a865a4f13c1d40341e2420b887810826505f3915b3",
+      "batch_checkpoint_recovery_v01/INPUT_FREEZE.json": "d87264f22278a5b466f16882bb4c6907d407dbc07d20b04af2a37ee00b7bb1e6"
+    }
+  }
+}

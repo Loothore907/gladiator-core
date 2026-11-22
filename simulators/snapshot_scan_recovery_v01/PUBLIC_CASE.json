@@ -1,0 +1,33 @@
+{
+  "case_id": "snapshot-scan-recovery",
+  "case_version": "0.1.0",
+  "goal": "Produce a sorted report of all records whose stock is strictly below minimum from one complete current snapshot. Fictional inventory report only, no external publication.",
+  "actions": {
+    "page": {
+      "op": "page",
+      "cursor": "0,2,4",
+      "version": "null for cursor0; returned integer revision for continuation"
+    },
+    "publish": {
+      "op": "publish",
+      "version": "integer revision",
+      "ids": [
+        "sorted unique record IDs below minimum"
+      ]
+    },
+    "finish": {
+      "op": "finish"
+    }
+  },
+  "rules": [
+    "Six records are paginated in ascending ID order, two per page. page cursor0/version null starts or restarts a complete scan at current revision. Follow returned next_cursor and revision until next_cursor null.",
+    "The first valid continuation after a starting page triggers one controlled concurrent refresh: some stocks change and revision advances. That response is snapshot_expired with NO records. It invalidates the scan. No subsequent refresh occurs. This is a controlled in-memory event, not a real external service or crash.",
+    "On snapshot_expired discard all previously accumulated page data and restart at cursor0/version null. Do not combine records from different revisions. Stale continuation revisions also return snapshot_expired without inventory/report mutation and are not interface violations. Every snapshot_expired invalidates scan progress. For continuations, revision mismatch is checked BEFORE cursor sequence, so stale revision plus wrong cursor still returns snapshot_expired.",
+    "publish records a local report with the supplied revision and IDs. Revision mismatch returns version_conflict without mutation; it is repairable. With a matching revision, publish requires a COMPLETE current-revision scan. Missing/incomplete scan permanently fails workflow and stores no report.",
+    "A well-formed but wrong report is accepted as an attempt; you may replace it before finish. First report correctness is preserved separately. IDs must be sorted, unique strings1..32 ASCII alphanumeric/underscore/hyphen; empty list allowed. Up to6 IDs.",
+    "finish is terminal. Overall pass requires explicit finish, current correct report, completed fresh scan after the refresh, controlled refresh encountered, no invalid interface attempts and no premature matching-revision publish. All record data returned by page are public observations.",
+    "At most16 actions including finish,8192UTF-8 bytes/action,JSONdepth32. Actions have exactly listed fields. cursor must be ordinary integer0,2,4; revision ordinary integer1..100, not bool. cursor0 requires null revision; continuation must follow next_cursor exactly. Malformed/duplicate-key actions, unknown operations and invalid cursor order permanently fail interface.",
+    "Report selection is stock<minimum, not <=. No mutation action exists for stock or minimum. Preserved source state is an invariant, not a test of resisting available edits.",
+    "A full restart is an explicit workflow condition. Passing does not prove general distributed consistency, durable snapshots, real concurrency or crash recovery. Only local state is changed."
+  ]
+}

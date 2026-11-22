@@ -1,0 +1,40 @@
+{
+  "expected": {
+    "state": {
+      "release": "v2",
+      "region": "west",
+      "note": null
+    },
+    "revision": 6,
+    "evidence": {
+      "release": "e5",
+      "region": "e9",
+      "note": "e9"
+    },
+    "pending": {
+      "d": {
+        "base_revision": 6,
+        "patch": {
+          "region": "north"
+        }
+      }
+    },
+    "commit_results": [
+      {
+        "event": "e5",
+        "result": "committed",
+        "revision": 5
+      },
+      {
+        "event": "e6",
+        "result": "conflict",
+        "revision": 5
+      },
+      {
+        "event": "e9",
+        "result": "committed",
+        "revision": 6
+      }
+    ]
+  }
+}

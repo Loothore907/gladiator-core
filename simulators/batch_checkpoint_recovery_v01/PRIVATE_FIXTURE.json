@@ -1,0 +1,31 @@
+{
+  "initial_stock": {
+    "A": 10,
+    "B": 20,
+    "C": 30,
+    "protected": 7
+  },
+  "plan": [
+    {
+      "id": "j1",
+      "bin": "A",
+      "units": 2
+    },
+    {
+      "id": "j2",
+      "bin": "B",
+      "units": 3
+    },
+    {
+      "id": "j3",
+      "bin": "A",
+      "units": 4
+    },
+    {
+      "id": "j4",
+      "bin": "C",
+      "units": 1
+    }
+  ],
+  "interrupt_after_jobs": 3
+}

@@ -1,0 +1,26 @@
+suite: workflow-starter
+version: 1
+description: >
+  Multi-tool workflow challenges (workflow@1). Every attempt gets a fresh generated world, identical for
+  both contestants. Difficulty is configuration, not content.
+
+defaults:
+  max_output_tokens: 4096   # includes reasoning/thinking tokens
+  effort: low
+  timeout_s: 180
+  difficulty: expert        # easy | standard | hard | expert (levels offered by each challenge)
+
+success:
+  primary: outcome
+  profile: balanced          # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: refund-queue
+    challenge: gladiator/refund-queue@2.2.0
+  - id: access-review
+    challenge: gladiator/access-review@1.2.0
+  - id: incident-triage
+    challenge: gladiator/incident-triage@1.2.0
+  - id: inventory-transfer
+    challenge: gladiator/inventory-transfer@1.2.0

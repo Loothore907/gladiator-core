@@ -1,0 +1,21 @@
+suite: marathon-incident
+version: 1
+description: >
+  incident-triage 1.1.0 at the marathon level only (100 alerts, four announced mid-task changes, more faults),
+  for calibration runs that spend a whole marathon budget on one challenge.
+
+defaults:
+  max_output_tokens: 8192   # includes reasoning/thinking tokens
+  effort: medium
+  timeout_s: 300
+  difficulty: marathon
+  attempt_time_limit_s: 2700   # 45 min per attempt (default 600 cut marathon attempts short, 2026-11-21)
+
+success:
+  primary: outcome
+  profile: balanced          # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: incident-triage
+    challenge: gladiator/incident-triage@1.2.0

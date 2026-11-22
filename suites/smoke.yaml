@@ -1,0 +1,30 @@
+suite: smoke
+version: 1
+description: >
+  Cheapest real-API check: one multi-turn case (tool results threaded back) and one single-answer case. Proves keys, network and each provider's API shape; not an evaluation.
+
+# Applied identically to both contestants.
+defaults:
+  max_output_tokens: 4096   # includes reasoning/thinking tokens
+  effort: low               # same reasoning effort v1 used
+  timeout_s: 180
+
+# Winner: most cases passed; ties -> task_correct, workflow_correct, lower cost, lower time.
+success:
+  primary: outcome
+  profile: balanced          # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [task_correct, workflow_correct, cost_usd, wall_s]
+
+# Each node runs a locked challenge package (challenges/). Suites configure; they can't edit.
+nodes:
+  - id: snapshot
+    challenge: gladiator/snapshot-scan-recovery@1.0.1
+  - id: transaction
+    challenge: gladiator/transaction-state@1.0.1
+  - id: refund-queue        # multi-tool path (workflow@1), smallest world
+    challenge: gladiator/refund-queue@2.0.0
+    settings: {difficulty: easy}
+
+links:
+  - {from: snapshot, to: transaction}
+  - {from: transaction, to: refund-queue}

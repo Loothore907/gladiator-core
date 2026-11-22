@@ -1,0 +1,21 @@
+suite: expert-inventory
+version: 1
+description: >
+  One workflow challenge (inventory-transfer 1.1.0) at its top level, for calibration runs that need a whole
+  budget for one test (long expert attempts at high reasoning effort). Fresh world per attempt,
+  identical for both contestants.
+
+defaults:
+  max_output_tokens: 8192   # includes reasoning/thinking tokens
+  effort: medium
+  timeout_s: 300
+  difficulty: expert
+
+success:
+  primary: outcome
+  profile: balanced          # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: inventory-transfer
+    challenge: gladiator/inventory-transfer@1.2.0

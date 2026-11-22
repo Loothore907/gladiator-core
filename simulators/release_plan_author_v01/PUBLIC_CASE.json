@@ -1,0 +1,88 @@
+{
+  "case_id": "release-plan-author",
+  "case_version": "0.1.0",
+  "authorship": "custom design/build example; no independent fourth capability score",
+  "goal": "Author one feasible nonpreemptive rollout schedule. Any feasible schedule passes; no optimization or unique gold answer.",
+  "protocol": {
+    "answer": "JSON object with exactly schedule; schedule is a list of exactly one {task,start} for every task. List order irrelevant.",
+    "start": "integer ticks, not booleans; 0 <= start <= 12",
+    "time": "half-open [start,start+duration); equality at dependency/resource boundaries is allowed",
+    "dependencies": "Every prerequisite must finish at or before successor starts.",
+    "resources": "Tasks using the same exclusive resource must not overlap. Different resources may run in parallel.",
+    "windows": "Each task must be entirely inside its own [earliest,latest_finish] window. All tasks finish by horizon.",
+    "submission": "One UTF-8 JSON line, <=8192 bytes, no duplicate fields, finite integers only, nesting <=32. One submission; no retry or execution of supplied code.",
+    "evaluation": "Interface validity and each schedule constraint reported separately. Local deterministic verification only. No real deployment.",
+    "visibility": "All constraints and tasks are public. Private tests are grader controls, not hidden task requirements."
+  },
+  "horizon": 12,
+  "tasks": [
+    {
+      "id": "snapshot",
+      "duration": 2,
+      "resource": "storage",
+      "after": [],
+      "earliest": 0,
+      "latest_finish": 4
+    },
+    {
+      "id": "build",
+      "duration": 3,
+      "resource": "compute",
+      "after": [],
+      "earliest": 0,
+      "latest_finish": 5
+    },
+    {
+      "id": "migrate",
+      "duration": 3,
+      "resource": "storage",
+      "after": [
+        "snapshot",
+        "build"
+      ],
+      "earliest": 3,
+      "latest_finish": 9
+    },
+    {
+      "id": "canary",
+      "duration": 2,
+      "resource": "compute",
+      "after": [
+        "build"
+      ],
+      "earliest": 3,
+      "latest_finish": 7
+    },
+    {
+      "id": "verify",
+      "duration": 2,
+      "resource": "compute",
+      "after": [
+        "migrate",
+        "canary"
+      ],
+      "earliest": 6,
+      "latest_finish": 10
+    },
+    {
+      "id": "publish",
+      "duration": 1,
+      "resource": "storage",
+      "after": [
+        "verify"
+      ],
+      "earliest": 9,
+      "latest_finish": 12
+    },
+    {
+      "id": "index",
+      "duration": 2,
+      "resource": "storage",
+      "after": [
+        "snapshot"
+      ],
+      "earliest": 2,
+      "latest_finish": 8
+    }
+  ]
+}

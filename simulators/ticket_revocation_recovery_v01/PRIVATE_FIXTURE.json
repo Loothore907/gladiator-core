@@ -1,0 +1,49 @@
+{
+  "initial_store": {
+    "a_other": {
+      "account": "OTHER",
+      "approved": true,
+      "status": "open",
+      "version": 1
+    },
+    "b_ready": {
+      "account": "ACME",
+      "approved": true,
+      "status": "open",
+      "version": 2
+    },
+    "c_denied": {
+      "account": "ACME",
+      "approved": false,
+      "status": "open",
+      "version": 3
+    },
+    "d_ready": {
+      "account": "ACME",
+      "approved": true,
+      "status": "open",
+      "version": 5
+    },
+    "e_closed": {
+      "account": "ACME",
+      "approved": true,
+      "status": "closed",
+      "version": 4
+    },
+    "f_ready": {
+      "account": "ACME",
+      "approved": true,
+      "status": "open",
+      "version": 8
+    }
+  },
+  "page_order": [
+    "a_other",
+    "b_ready",
+    "c_denied",
+    "d_ready",
+    "e_closed",
+    "f_ready"
+  ],
+  "fault_policy": "revoke_first_version_valid_permitted_patch_once"
+}

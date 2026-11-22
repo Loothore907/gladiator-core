@@ -1,0 +1,20 @@
+suite: recovery
+version: 1
+description: >
+  The recovery family: job-queue-recovery at standard (resume after an interrupted run with a stale checkpoint,
+  jobs added mid-task, an account suspended mid-task, ambiguous timeouts). Cheap enough for small models.
+
+defaults:
+  max_output_tokens: 4096   # includes reasoning/thinking tokens
+  effort: low
+  timeout_s: 180
+  difficulty: standard
+
+success:
+  primary: outcome
+  profile: budget            # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [passed, task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: job-queue-recovery
+    challenge: gladiator/job-queue-recovery@1.1.0

@@ -1,0 +1,59 @@
+{
+ "snapshot_scan_recovery_v01": [
+  "{\"op\": \"page\", \"cursor\": 0, \"version\": null}",
+  "{\"op\": \"page\", \"cursor\": 2, \"version\": 1}",
+  "{\"op\": \"page\", \"cursor\": 0, \"version\": null}",
+  "{\"op\": \"page\", \"cursor\": 2, \"version\": 2}",
+  "{\"op\": \"page\", \"cursor\": 4, \"version\": 2}",
+  "{\"op\": \"publish\", \"version\": 2, \"ids\": [\"c\", \"d\", \"f\"]}",
+  "{\"op\": \"finish\"}"
+ ],
+ "interval_union_repair_v01": [
+  "{\"op\": \"write\", \"path\": \"query.sql\", \"content\": \"WITH eligible AS (\\n SELECT * FROM maintenance_windows WHERE status='active' AND start_tick<end_tick\\n), prior AS (\\n SELECT *, MAX(end_tick) OVER (PARTITION BY tenant,asset ORDER BY start_tick,end_tick,interval_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previous_end FROM eligible\\n), marked AS (\\n SELECT *,CASE WHEN previous_end IS NULL OR start_tick>previous_end THEN 1 ELSE 0 END AS new_segment FROM prior\\n), grouped AS (\\n SELECT *,SUM(new_segment) OVER (PARTITION BY tenant,asset ORDER BY start_tick,end_tick,interval_id ROWS UNBOUNDED PRECEDING) AS segment FROM marked\\n), spans AS (\\n SELECT tenant,asset,segment,MIN(start_tick) AS lo,MAX(end_tick) AS hi FROM grouped GROUP BY tenant,asset,segment\\n)\\nSELECT tenant,asset,SUM(hi-lo) AS covered_ticks,COUNT(*) AS segments FROM spans GROUP BY tenant,asset ORDER BY tenant,asset\"}",
+  "{\"op\": \"test\"}",
+  "{\"op\": \"finish\"}"
+ ],
+ "dependency_reachability_repair_v01": [
+  "{\"op\": \"write\", \"path\": \"query.sql\", \"content\": \"WITH RECURSIVE reach(tenant,source,target) AS (SELECT tenant,source,target FROM edges WHERE status='active' UNION SELECT r.tenant,r.source,e.target FROM reach r JOIN edges e ON e.tenant=r.tenant AND e.source=r.target WHERE e.status='active') SELECT tenant,source,target FROM reach WHERE source<>target ORDER BY tenant,source,target\"}",
+  "{\"op\": \"test\"}",
+  "{\"op\": \"finish\"}"
+ ],
+ "quota_prefix_repair_v01": [
+  "{\"op\": \"write\", \"path\": \"query.sql\", \"content\": \"WITH ranked AS (SELECT *, SUM(units) OVER(PARTITION BY tenant,queue ORDER BY priority DESC,request_id ROWS UNBOUNDED PRECEDING) AS used_units FROM requests WHERE status='active') SELECT tenant,queue,request_id,used_units FROM ranked WHERE used_units<=capacity ORDER BY tenant,queue,priority DESC,request_id\"}",
+  "{\"op\": \"test\"}",
+  "{\"op\": \"finish\"}"
+ ],
+ "ticket_revocation_recovery_v01": [
+  "{\"op\": \"list\", \"cursor\": 0}",
+  "{\"op\": \"list\", \"cursor\": 1}",
+  "{\"op\": \"list\", \"cursor\": 2}",
+  "{\"op\": \"list\", \"cursor\": 3}",
+  "{\"op\": \"list\", \"cursor\": 4}",
+  "{\"op\": \"list\", \"cursor\": 5}",
+  "{\"op\": \"patch\", \"id\": \"b_ready\", \"expected_version\": 2, \"changes\": {\"status\": \"closed\"}}",
+  "{\"op\": \"read\", \"id\": \"b_ready\"}",
+  "{\"op\": \"patch\", \"id\": \"d_ready\", \"expected_version\": 5, \"changes\": {\"status\": \"closed\"}}",
+  "{\"op\": \"patch\", \"id\": \"f_ready\", \"expected_version\": 8, \"changes\": {\"status\": \"closed\"}}",
+  "{\"op\": \"finish\"}"
+ ],
+ "transaction_state_v01": [
+  "{\"state\": {\"release\": \"v2\", \"region\": \"west\", \"note\": null}, \"revision\": 6, \"evidence\": {\"release\": \"e5\", \"region\": \"e9\", \"note\": \"e9\"}, \"pending\": {\"d\": {\"base_revision\": 6, \"patch\": {\"region\": \"north\"}}}, \"commit_results\": [{\"event\": \"e5\", \"result\": \"committed\", \"revision\": 5}, {\"event\": \"e6\", \"result\": \"conflict\", \"revision\": 5}, {\"event\": \"e9\", \"result\": \"committed\", \"revision\": 6}]}"
+ ],
+ "release_plan_author_v01": [
+  "{\"schedule\":[{\"start\":0,\"task\":\"snapshot\"},{\"start\":0,\"task\":\"build\"},{\"start\":2,\"task\":\"index\"},{\"start\":4,\"task\":\"migrate\"},{\"start\":3,\"task\":\"canary\"},{\"start\":7,\"task\":\"verify\"},{\"start\":9,\"task\":\"publish\"}]}"
+ ],
+ "release_rollback_state_v01": [
+  "{\"evidence\":{\"alert\":\"initial\",\"note\":\"m4\",\"region\":\"m2\",\"release\":\"m4\"},\"state\":{\"alert\":\"on\",\"note\":null,\"region\":\"north\",\"release\":\"v1\"}}"
+ ],
+ "watermark_state_v01": [
+  "{\"accepted_ids\":{\"A\":[\"a1\",\"a2\",\"a3\",\"late\"],\"B\":[\"a1\",\"b1\",\"b2\",\"b3\"]},\"closed\":[{\"count\":2,\"end\":5,\"partition\":\"A\",\"start\":0,\"total\":6},{\"count\":2,\"end\":5,\"partition\":\"B\",\"start\":0,\"total\":8},{\"count\":1,\"end\":10,\"partition\":\"A\",\"start\":5,\"total\":7}],\"open\":[{\"count\":1,\"end\":15,\"partition\":\"A\",\"start\":10,\"total\":1},{\"count\":2,\"end\":10,\"partition\":\"B\",\"start\":5,\"total\":6}],\"rejections\":[{\"command\":\"e4\",\"reason\":\"late\"},{\"command\":\"e5\",\"reason\":\"duplicate\"},{\"command\":\"e10\",\"reason\":\"duplicate\"},{\"command\":\"e12\",\"reason\":\"duplicate\"},{\"command\":\"e17\",\"reason\":\"late\"}],\"watermarks\":{\"A\":10,\"B\":7}}"
+ ],
+ "batch_checkpoint_recovery_v01": [
+  "{\"ids\":[\"j1\",\"j2\",\"j3\",\"j4\"],\"op\":\"apply\"}",
+  "{\"cursor\":0,\"op\":\"receipts\"}",
+  "{\"cursor\":2,\"op\":\"receipts\"}",
+  "{\"op\":\"reconcile\"}",
+  "{\"ids\":[\"j4\"],\"op\":\"apply\"}",
+  "{\"op\":\"finish\"}"
+ ]
+}

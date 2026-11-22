@@ -1,0 +1,897 @@
+# Challenge status: how much we trust each challenge version, and the evidence for it.
+# This file is NOT part of any challenge's sealed content: promoting, demoting or retiring a challenge
+# edits only this file. See docs/PRODUCT.md (trust tiers, admission rules).
+#
+# status: unreviewed | community | candidate | official | retired
+
+# Calibration log: the matches run to calibrate the challenges, with each run's reported cost.
+# Run links point to the project's private operations repository, where matches are run and their
+# private simulator records are kept; each run's public record is sealed (docs/RUN_RECORD.md).
+calibration:
+  runs:
+    - date: 2026-11-20
+      run: https://github.com/Loothore907/gladiator/actions/runs/44805540490
+      contestants: openai:gpt-6.2-sol (effort high) vs openai:gpt-6.2-astra (effort medium)
+      suite: ten-case x1
+      cap_usd: 5
+      actual_usd: 0.498   # sol 0.113, astra 0.385
+      result: both 10/10; no truncations, budget stops or outages
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44847196298
+      contestants: openai:gpt-6.2-sol (effort high) vs openai:gpt-6.2-astra (effort medium)
+      suite: workflow_starter (refund-queue@1.0.0 hard) x3
+      cap_usd: 5
+      actual_usd: 0.933   # sol 0.208, astra 0.725
+      result: sol 1/3, astra 3/3
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44848020472
+      contestants: openai:gpt-6.2-sol (effort high) vs openai:gpt-6.2-astra (effort medium)
+      suite: workflow_starter (refund-queue@1.0.0 hard) x5
+      cap_usd: 5
+      actual_usd: 1.546   # sol 0.330, astra 1.216
+      result: sol 2/5, astra 5/5
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44853467475
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: probe (refund-queue@2.0.0 easy) x1
+      cap_usd: 1
+      actual_usd: 0.133
+      result: both accept effort max (sol passed; astra cut off by the cap's worst-case hold, as expected)
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44853759329
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort low)
+      suite: workflow_starter (refund-queue@2.0.0 + access-review@1.0.0, expert) x2
+      cap_usd: 5
+      actual_usd: 2.769   # sol 0.815, astra 1.953
+      result: sol 4/4, astra 2/4 (astra's failures were blind retries after timeouts; every decision correct for both)
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44854268379
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: expert_access (access-review@1.0.0 expert) x2
+      cap_usd: 5
+      actual_usd: 1.341   # sol 0.319, astra 1.022
+      result: both 2/2, every decision correct
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44855158924
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: expert_refund (refund-queue@2.0.0 expert) x2
+      cap_usd: 5
+      actual_usd: 1.812   # sol 0.533, astra 1.279
+      result: sol 1/2 (4 blind retries), astra 1/1 counted (attempt 2 cut off by the cap's worst-case hold at 32/40 correct, 0 wrong)
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44855535266
+      contestants: anthropic:claude-fable-5-2 (effort high) vs google:gemini-4-neon (effort high)
+      suite: workflow_starter (both challenges, expert) x1
+      cap_usd: 5
+      actual_usd: 3.652   # fable 1.427 (prompt caching on); neon 2.225 as billed by our prices before Gemini cached prices were added (overstated)
+      result: fable 2/2, every decision correct; neon cut off by the cap on its first attempt (16/40 correct, 0 wrong, 62 calls), no verdict
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44857963605
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: expert_refund (refund-queue@2.0.0 expert) x2, after the cap estimate fix (#31)
+      cap_usd: 5
+      actual_usd: 1.919   # sol 0.416, astra 1.503
+      result: both 2/2, every decision correct; no cap cut-offs (astra used 138 calls on one attempt)
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44876509780
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: expert_incident (incident-triage@1.0.0 expert) x2
+      cap_usd: 5
+      actual_usd: 1.182   # sol 0.277, astra 0.905
+      result: both 0/2, the same 4 and 2 "wrong" calls on the same items; all from the 1.0.0 rule-text flaw (see catalog entry)
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44876511780
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: expert_incident (incident-triage@1.0.0 expert) x2
+      cap_usd: 5
+      actual_usd: 1.268   # sol 0.288, astra 0.980
+      result: both 2/2 (these worlds didn't hit the flaw)
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44876514005
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort low)
+      suite: expert_incident (incident-triage@1.0.0 expert) x2
+      cap_usd: 5
+      actual_usd: 0.968   # sol 0.310, astra 0.658
+      result: both 0/2 on identical flaw items; astra low also 1 blind retry and 1 double page
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44877738018
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: expert_inventory (inventory-transfer@1.0.0 expert) x2
+      cap_usd: 5
+      actual_usd: 1.533   # sol 0.419, astra 1.114
+      result: both 2/2, every decision correct
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44877739880
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort low)
+      suite: expert_inventory (inventory-transfer@1.0.0 expert) x2
+      cap_usd: 5
+      actual_usd: 1.109   # sol 0.414, astra 0.695
+      result: sol 2/2; astra low 0/2 (blind retries; one duplicate shipment used up stock and caused 2 wrong decisions later)
+
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44881857631
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: workflow_starter (refund-queue 2.1.0, access-review 1.1.0, incident-triage 1.1.0, inventory-transfer 1.1.0; expert) x1
+      cap_usd: 5
+      actual_usd: 2.815   # sol 0.716, astra 2.100
+      result: sol 4/4; astra 3/3 counted (inventory cut off by the run cap at 23/36 correct, 0 wrong); every decision correct, notices handled; efficiency (balanced) sol 0.91 vs astra 1.09, 3-0
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44882601849
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: "marathon_incident (incident-triage 1.1.0 at marathon, 100 alerts, 4 announced changes) x2"
+      cap_usd: 15
+      actual_usd: 3.209   # sol 0.675, astra 2.534
+      result: both 2/2, every decision correct across all changes; efficiency (balanced) sol 0.87 vs astra 1.13, 2-0 (astra used fewer tokens but cost 3.8x; sol 21% faster)
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44886050123
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs google:gemini-3.1-flash-lite (effort low)
+      suite: small_tier (four workflow tests at standard, $0.12 attempt budget, budget profile) x1
+      cap_usd: 1
+      actual_usd: 0.198   # haiku 0.073, flash-lite 0.125
+      result: haiku 1/4 passed (inventory), flash-lite 0/4; mistake points 18 vs 55; efficiency (budget, final rule) haiku 0.81 vs flash-lite 1.22, 4-0
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44886483539
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs openai:gpt-6-luna (effort low)
+      suite: small_tier x2
+      cap_usd: 1
+      actual_usd: 0.174   # haiku 0.151, luna 0.023
+      result: >-
+        haiku 2/8 passed (task correct 5/8), luna 0/8 (task correct 0/8); mistake points 25 vs 95. Luna cost 6.5x
+        less. Efficiency (final rule): budget profile luna 0.84 vs haiku 1.17 (8-0); balanced profile haiku 0.92 vs
+        luna 1.09 (5-3). Under the victory rule (owner, 2026-11-21: success first, then efficiency or progress)
+        haiku wins 7-1 (2 pairs by success, 5 by getting further; luna 1 by getting further).
+        Blind retries after a timeout were near-universal at standard for both small models.
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44934838632
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: frontier (refund-reconciliation 1.0.0 at expert) x2
+      cap_usd: 5
+      actual_usd: 2.747   # sol 0.674, astra 2.073
+      result: >-
+        Frontier probe. Every decision correct in every attempt (36/36 for both; astra's second attempt was cut off by
+        the run cap at 32/36 decided, 0 wrong, so it was left out). The hidden quota and the ledger conflicts did not
+        stump either model at max effort. sol's first attempt failed on recovery only (one duplicate refund after 4
+        blind retries); astra was perfect but cost about 3.4x per attempt (1.15 vs 0.34). Victory rule: astra 1-0 on
+        success over the one comparable pair. No frontier badge.
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44936446683
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: marathon_frontier (refund-reconciliation 1.0.0 at marathon, 90 requests) x1
+      cap_usd: 12
+      actual_usd: 3.152   # sol 0.749, astra 2.402
+      result: >-
+        INCONCLUSIVE: both attempts were cut off by the engine's 10-minute per-attempt wall limit (a harness
+        setting, not the models): sol at 62/90 decided, astra at 60/90. Up to the cut-off, 0 wrong decisions for
+        both; astra had 4 duplicate refunds after 7 blind retries (recovery again), sol none. Fixed afterwards:
+        suites can set attempt_time_limit_s (marathon suites: 45 min) and the Match job allows 4 hours.
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44940710507
+      contestants: openai:gpt-6.2-sol (effort max) vs openai:gpt-6.2-astra (effort max)
+      suite: marathon_frontier (refund-reconciliation 1.0.0 at marathon, 90 requests, 45-min attempt limit) x1
+      cap_usd: 12
+      actual_usd: 5.407   # sol 1.304, astra 4.103
+      result: >-
+        Both decided all 90 requests correctly (hidden quota and ledger rules held over the full length; no
+        duplicate refunds). Neither passed: each retried 3 times after an ambiguous timeout without checking first
+        (lucky: no duplicates resulted, but the process is graded). Equal progress, so efficiency decided: sol won
+        1-0 at about a third of astra's cost (1.30 vs 4.10), same time (~17 min). No frontier badge: rule-following
+        does not stump top models; recovery discipline is the only failure, in both.
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44943918568
+      contestants: openai:gpt-6.2-sol (effort low) vs openai:gpt-6.2-astra (effort low)
+      suite: frontier (refund-reconciliation 1.0.0 at expert) x2
+      cap_usd: 5
+      actual_usd: 2.101   # sol 0.271, astra 1.830
+      result: >-
+        Effort comparison. At low effort sol breaks: attempt 1 ran out of actions at 31/36 with 2 wrong decisions
+        (held 2 requests that should have been approved), attempt 2 stopped calling tools after 20 calls. astra at
+        low stays near its max-effort level: 35/36 then a clean pass, at about 0.91 per attempt (vs 1.15 at max).
+        astra 2-0 (one by success, one by getting further). Reading with the max-effort runs: sol needs high effort
+        to be the efficiency winner; astra keeps its quality at low effort, but costs ~3x sol-max per attempt.
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44951701123
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs openai:gpt-6-luna (effort low)
+      suite: small_tier x2 (round-robin of 4 small models, same test versions)
+      cap_usd: 0.9
+      actual_usd: 0.169   # haiku 0.147, luna 0.022
+      result: haiku 5-3 (Ledger, victory rule)
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44951703917
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs google:gemini-3.1-flash-lite (effort low)
+      suite: small_tier x2 (round-robin of 4 small models, same test versions)
+      cap_usd: 0.9
+      actual_usd: 0.386   # haiku 0.148, flash-lite 0.238
+      result: haiku 7-1
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44951706825
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs google:gemini-3.5-flash-lite (effort low)
+      suite: small_tier x2 (round-robin of 4 small models, same test versions)
+      cap_usd: 0.9
+      actual_usd: 0.421   # haiku 0.146, 3.5-flash-lite 0.276
+      result: haiku 8-0
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44951709447
+      contestants: openai:gpt-6-luna (effort low) vs google:gemini-3.1-flash-lite (effort low)
+      suite: small_tier x2 (round-robin of 4 small models, same test versions)
+      cap_usd: 0.9
+      actual_usd: 0.232   # luna 0.022, flash-lite 0.210
+      result: 4-4 on pairs; the engine gave luna the match on mean efficiency (pair wins level)
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44951712015
+      contestants: openai:gpt-6-luna (effort low) vs google:gemini-3.5-flash-lite (effort low)
+      suite: small_tier x2 (round-robin of 4 small models, same test versions)
+      cap_usd: 0.9
+      actual_usd: 0.298   # luna 0.021, 3.5-flash-lite 0.277
+      result: luna 5-3
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44951714782
+      contestants: google:gemini-3.1-flash-lite (effort low) vs google:gemini-3.5-flash-lite (effort low)
+      suite: small_tier x2 (round-robin of 4 small models, same test versions)
+      cap_usd: 0.9
+      actual_usd: 0.484   # 3.1 0.245, 3.5 0.239
+      result: 3.1-flash-lite 7-1 (the newer 3.5 got less far on 7 of 8 pairs)
+      notes: >-
+        Round-robin summary (Gladiator Ledger, victory rule, 48 pairs): no beat cycles; the ladder is haiku >
+        luna ~ 3.1-flash-lite > 3.5-flash-lite. Per attempt: haiku 2/24 passed, 4.5 mistake points, $0.018;
+        luna 1/24, 8.7, $0.003; 3.1-flash-lite 0/24, 6.1, $0.029; 3.5-flash-lite 0/24, 11.6, $0.033.
+        Round-robin total $1.99.
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44959132862
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs openai:gpt-6-luna (effort low)
+      suite: small_tier x1 (round-robin fill-in, every small model to 9 pairs per workflow)
+      cap_usd: 0.5
+      actual_usd: 0.092   # haiku 0.080, luna 0.011
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44959135418
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs google:gemini-3.1-flash-lite (effort low)
+      suite: small_tier x1 (round-robin fill-in, every small model to 9 pairs per workflow)
+      cap_usd: 0.5
+      actual_usd: 0.207   # haiku 0.076, 3.1-flash-lite 0.130
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44959137743
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs google:gemini-3.5-flash-lite (effort low)
+      suite: small_tier x1 (round-robin fill-in, every small model to 9 pairs per workflow)
+      cap_usd: 0.5
+      actual_usd: 0.205   # haiku 0.076, 3.5-flash-lite 0.129
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44959140040
+      contestants: openai:gpt-6-luna (effort low) vs google:gemini-3.1-flash-lite (effort low)
+      suite: small_tier x1 (round-robin fill-in, every small model to 9 pairs per workflow)
+      cap_usd: 0.5
+      actual_usd: 0.140   # luna 0.012, 3.1-flash-lite 0.128
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44959142281
+      contestants: openai:gpt-6-luna (effort low) vs google:gemini-3.5-flash-lite (effort low)
+      suite: small_tier x1 (round-robin fill-in, every small model to 9 pairs per workflow)
+      cap_usd: 0.5
+      actual_usd: 0.156   # luna 0.011, 3.5-flash-lite 0.144
+    - date: 2026-11-21
+      run: https://github.com/Loothore907/gladiator/actions/runs/44959144665
+      contestants: google:gemini-3.1-flash-lite (effort low) vs google:gemini-3.5-flash-lite (effort low)
+      suite: small_tier x1 (round-robin fill-in, every small model to 9 pairs per workflow)
+      cap_usd: 0.5
+      actual_usd: 0.216   # 3.1-flash-lite 0.122, 3.5-flash-lite 0.093
+      notes: >-
+        Fill-in total $1.02. With the fill-ins, Gladiator Ledger
+        (suite small-tier, current versions, budget $0.05/attempt) leans haiku: 31 of 36 pairs won, but only 8-4
+        head to head against luna (sign test p 0.39), so no settled pick yet. Two beat cycles on single test
+        versions, both mostly 2-1 edges (refund-queue 2.2.0: haiku > 3.1-flash-lite > luna > haiku).
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44964742065
+      contestants: google:gemini-3.8-flash (effort low) vs anthropic:claude-haiku-5-5 (effort low)
+      suite: mid_tier x2 (mid-tier round-robin)
+      cap_usd: 3
+      actual_usd: 0.705   # gemini-3.8-flash 0.561, claude-haiku-5-5 0.145
+      result: passed 0/8 vs 0/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44964739622
+      contestants: anthropic:claude-sonnet-5-5 (effort low) vs openai:gpt-6.1-terra (effort low)
+      suite: mid_tier x2 (mid-tier round-robin)
+      cap_usd: 3
+      actual_usd: 0.549   # claude-sonnet-5-5 0.402, gpt-6.1-terra 0.147
+      result: passed 1/8 vs 0/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44964744508
+      contestants: anthropic:claude-sonnet-5-5 (effort low) vs google:gemini-3.8-flash (effort low)
+      suite: mid_tier x2 (mid-tier round-robin)
+      cap_usd: 3
+      actual_usd: 0.989   # claude-sonnet-5-5 0.397, gemini-3.8-flash 0.592
+      result: passed 1/8 vs 1/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44964746755
+      contestants: openai:gpt-6.1-terra (effort low) vs anthropic:claude-haiku-5-5 (effort low)
+      suite: mid_tier x2 (mid-tier round-robin)
+      cap_usd: 3
+      actual_usd: 0.318   # gpt-6.1-terra 0.164, claude-haiku-5-5 0.154
+      result: passed 1/8 vs 2/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44965547807
+      contestants: openrouter:deepseek/deepseek-v4.1-flash-1017 (effort low) vs openrouter:z-ai/glm-5.3 (effort low)
+      suite: small_tier x2 (open-weights round-robin)
+      cap_usd: 1
+      actual_usd: 0.114   # deepseek-v4.1-flash-1017 0.054, glm-5.3 0.060
+      result: passed 3/8 vs 0/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44965550188
+      contestants: openrouter:qwen/qwen3.8-27b (effort low) vs openrouter:moonshotai/kimi-k3.1-pro (effort low)
+      suite: small_tier x2 (open-weights round-robin)
+      cap_usd: 1
+      actual_usd: 0.225   # qwen3.8-27b 0.203, kimi-k3.1-pro 0.022
+      result: passed 0/8 vs 0/8; 8 attempts excluded (provider_error, OpenRouter new-account 20 rpm limit on kimi-k3.1-pro)
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44966145818
+      contestants: anthropic:claude-sonnet-5-5 (effort low) vs anthropic:claude-haiku-5-5 (effort low)
+      suite: mid_tier x2 (mid-tier round-robin)
+      cap_usd: 3
+      actual_usd: 0.564   # claude-sonnet-5-5 0.413, claude-haiku-5-5 0.151
+      result: passed 2/8 vs 2/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44966148284
+      contestants: openrouter:deepseek/deepseek-v4.1-flash-1017 (effort low) vs openrouter:qwen/qwen3.8-27b (effort low)
+      suite: small_tier x2 (open-weights round-robin)
+      cap_usd: 1
+      actual_usd: 0.267   # deepseek-v4.1-flash-1017 0.061, qwen3.8-27b 0.207
+      result: passed 4/8 vs 2/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44966728207
+      contestants: openai:gpt-6.1-terra (effort low) vs google:gemini-3.8-flash (effort low)
+      suite: mid_tier x2 (mid-tier round-robin)
+      cap_usd: 3
+      actual_usd: 0.659   # gpt-6.1-terra 0.166, gemini-3.8-flash 0.493
+      result: passed 0/8 vs 0/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44966733087
+      contestants: openrouter:qwen/qwen3.8-27b (effort low) vs openrouter:z-ai/glm-5.3 (effort low)
+      suite: small_tier x2 (open-weights round-robin)
+      cap_usd: 1
+      actual_usd: 0.270   # qwen3.8-27b 0.201, glm-5.3 0.069
+      result: passed 1/8 vs 0/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44966730903
+      contestants: openrouter:minimax/minimax-m3.1-flash (effort low) vs openrouter:deepseek/deepseek-v4.1-flash-1017 (effort low)
+      suite: small_tier x2 (open-weights round-robin)
+      cap_usd: 1
+      actual_usd: 0.099   # minimax-m3.1-flash 0.040, deepseek-v4.1-flash-1017 0.059
+      result: passed 1/8 vs 1/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44967398683
+      contestants: openrouter:qwen/qwen3.8-27b (effort low) vs openrouter:minimax/minimax-m3.1-flash (effort low)
+      suite: small_tier x2 (open-weights round-robin)
+      cap_usd: 1
+      actual_usd: 0.212   # qwen3.8-27b 0.158, minimax-m3.1-flash 0.054
+      result: passed 0/8 vs 0/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44967396622
+      contestants: openrouter:z-ai/glm-5.3 (effort low) vs openrouter:minimax/minimax-m3.1-flash (effort low)
+      suite: small_tier x2 (open-weights round-robin)
+      cap_usd: 1
+      actual_usd: 0.136   # glm-5.3 0.064, minimax-m3.1-flash 0.071
+      result: passed 0/8 vs 1/8
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44968076868
+      contestants: anthropic:claude-sonnet-5-5 (effort low) vs openai:gpt-6.1-terra (effort low)
+      suite: mid_tier x1 (mid-tier fill-in)
+      cap_usd: 2
+      actual_usd: 0.300   # claude-sonnet-5-5 0.217, gpt-6.1-terra 0.083
+      result: passed 1/4 vs 0/4
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44968758729
+      contestants: anthropic:claude-sonnet-5-5 (effort low) vs anthropic:claude-haiku-5-5 (effort low)
+      suite: mid_tier x1 (mid-tier fill-in)
+      cap_usd: 2
+      actual_usd: 0.286   # claude-sonnet-5-5 0.210, claude-haiku-5-5 0.077
+      result: passed 0/4 vs 0/4
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44968756220
+      contestants: openai:gpt-6.1-terra (effort low) vs anthropic:claude-haiku-5-5 (effort low)
+      suite: mid_tier x1 (mid-tier fill-in)
+      cap_usd: 2
+      actual_usd: 0.160   # gpt-6.1-terra 0.085, claude-haiku-5-5 0.075
+      result: passed 0/4 vs 1/4
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44968761081
+      contestants: anthropic:claude-sonnet-5-5 (effort low) vs google:gemini-3.8-flash (effort low)
+      suite: mid_tier x1 (mid-tier fill-in)
+      cap_usd: 2
+      actual_usd: 0.458   # claude-sonnet-5-5 0.203, gemini-3.8-flash 0.255
+      result: passed 1/4 vs 1/4
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44969623891
+      contestants: google:gemini-3.8-flash (effort low) vs anthropic:claude-haiku-5-5 (effort low)
+      suite: mid_tier x1 (mid-tier fill-in)
+      cap_usd: 2
+      actual_usd: 0.329   # gemini-3.8-flash 0.258, claude-haiku-5-5 0.071
+      result: passed 0/4 vs 1/4
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44969626322
+      contestants: openai:gpt-6.1-terra (effort low) vs google:gemini-3.8-flash (effort low)
+      suite: mid_tier x1 (mid-tier fill-in)
+      cap_usd: 2
+      actual_usd: 0.352   # gpt-6.1-terra 0.084, gemini-3.8-flash 0.268
+      result: passed 0/4 vs 0/4
+      notes: >-
+        Nov 22 window, night of Nov 21-22 (round-robins + fill-in): 19 runs, $6.99 actual.
+        Gladiator Ledger (current versions, victory rule). Small-tier suite: haiku 31/36 pairs, minimax 20/24,
+        deepseek 18/24 (8 passes, $0.007/attempt, cheapest clean result of any model), luna 17/36, 3.1-flash-lite
+        17/36, glm 6/24, 3.5-flash-lite 7/36, qwen 4/24. Open-weights ladder: minimax > deepseek > glm > qwen, no
+        cycles. Mid-tier suite: haiku 30/36 (anchor) > terra 25/36 > sonnet 11/36 > gemini-3.8-flash 3/36; haiku
+        leads terra 8-3 head to head (p 0.23, a lean). kimi-k3.1-pro could not play (OpenRouter new-account 20 rpm
+        limit): its 3 remaining matches were skipped.
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44977712387
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs openrouter:minimax/minimax-m3.1-flash (effort low)
+      suite: small_tier x2 (link match (haiku vs open-weights leader))
+      cap_usd: 1
+      actual_usd: 0.199   # claude-haiku-5-5 0.151, minimax-m3.1-flash 0.048
+      result: passed 1/8 vs 1/8, 0 attempts excluded
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44977714916
+      contestants: anthropic:claude-haiku-5-5 (effort low) vs openrouter:deepseek/deepseek-v4.1-flash-1017 (effort low)
+      suite: small_tier x2 (link match (haiku vs open-weights leader))
+      cap_usd: 1
+      actual_usd: 0.193   # claude-haiku-5-5 0.146, deepseek-v4.1-flash-1017 0.047
+      result: passed 0/8 vs 1/8, 0 attempts excluded
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44977717106
+      contestants: openrouter:nvidia/nemotron-3.5-super-vl (effort low) vs openrouter:deepseek/deepseek-v4.1-flash-1017 (effort low)
+      suite: small_tier x2 (open-weights round-robin, nemotron replaces kimi)
+      cap_usd: 1
+      actual_usd: 0.124   # nemotron-3.5-super-vl 0.081, deepseek-v4.1-flash-1017 0.043
+      result: passed 0/8 vs 0/8, 0 attempts excluded
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44978453266
+      contestants: openrouter:nvidia/nemotron-3.5-super-vl (effort low) vs openrouter:z-ai/glm-5.3 (effort low)
+      suite: small_tier x2 (open-weights round-robin, nemotron replaces kimi)
+      cap_usd: 1
+      actual_usd: 0.172   # nemotron-3.5-super-vl 0.102, glm-5.3 0.070
+      result: passed 0/8 vs 0/8, 0 attempts excluded
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44978455374
+      contestants: openrouter:nvidia/nemotron-3.5-super-vl (effort low) vs openrouter:qwen/qwen3.8-27b (effort low)
+      suite: small_tier x2 (open-weights round-robin, nemotron replaces kimi)
+      cap_usd: 1
+      actual_usd: 0.185   # nemotron-3.5-super-vl 0.063, qwen3.8-27b 0.122
+      result: passed 1/8 vs 2/8, 0 attempts excluded
+    - date: 2026-11-22
+      run: https://github.com/Loothore907/gladiator/actions/runs/44978457571
+      contestants: openrouter:nvidia/nemotron-3.5-super-vl (effort low) vs openrouter:minimax/minimax-m3.1-flash (effort low)
+      suite: small_tier x2 (open-weights round-robin, nemotron replaces kimi)
+      cap_usd: 1
+      actual_usd: 0.136   # nemotron-3.5-super-vl 0.092, minimax-m3.1-flash 0.044
+      result: passed 2/8 vs 2/8, 0 attempts excluded
+      notes: >-
+        Owner-approved link matches and Kimi swap (2026-11-22): 6 runs, $1.01 actual. Direct head to head
+        overturned the indirect small-tier lean: deepseek beat haiku 8-0 and minimax beat haiku 6-2, almost all
+        on efficiency (haiku still makes the fewest mistakes but costs ~3x per attempt). nvidia/nemotron-3.5-
+        super-vl replaced kimi-k3.1-pro (OpenRouter new-account rate limit) and played its 4 pairings cleanly.
+# Efficiency re-score (2026-11-21, offline, balanced profile; lower is better, 1.00 = even), per test across the
+# expert calibration runs. Per test the samples are small (2-4 pairs, none conclusive alone); pooled, sol (max)
+# beat astra (max) on efficiency in 10 of 11 pairs (sign test about 1%) and astra (low) in 8 of 8.
+#   access-review:      sol max 0.90 vs astra max 1.10 (2-0); sol max 0.70 vs astra low 1.30 (2-0)
+#   incident-triage:    sol max 0.89 vs astra max 1.11 (4-0); sol max 0.89 vs astra low 1.11 (2-0)
+#   inventory-transfer: sol max 0.95 vs astra max 1.05 (2-0); sol max 0.62 vs astra low 1.38 (2-0)
+#   refund-queue 2.0:   sol max 1.03 vs astra max 0.97 (2-1: one sol failure weighs heavily); sol max 0.85 vs
+#                       astra low 1.15 (2-0)
+# Under the efficiency gate (docs/PRODUCT.md section 6) each test needs more repeats to reach "a real difference"
+# on its own; cheap and mid-tier models (the sweet spot) make those repeats affordable.
+
+challenges:
+  gladiator/snapshot-scan-recovery@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/interval-union-sql@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/dependency-reachability-sql@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/quota-prefix-sql@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/ticket-revocation-recovery@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/transaction-state@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/release-plan@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/release-rollback-state@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/watermark-state@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/batch-checkpoint-recovery@1.0.1:
+    status: community
+    since: 2026-11-20
+    notes: >-
+      WARM-UP, not competitive. v1 simulator, byte-for-byte; passes its reference solution and fails
+      invalid play. Calibration 2026-11-20: saturated at the top (gpt-6.2-sol high and gpt-6.2-astra
+      medium both passed; gpt-6-luna also passed every attempt), so it cannot separate strong models
+      and is not eligible for official. Still useful as a smoke/warm-up test and for weak-model
+      comparisons (glm-5.3-flash failed often).
+    evidence:
+      - https://github.com/Loothore907/gladiator/actions/runs/44787702980  # glm-5.3-flash 8/18, gpt-6-luna 18/18 (six-case x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44805540490  # calibration: sol high 10/10, astra medium 10/10 (ten-case x1)
+  gladiator/refund-queue@1.0.0:
+    status: retired
+    since: 2026-11-21
+    notes: >-
+      First workflow@1 challenge (generator; easy/standard/hard). Passes automated validation: the oracle
+      player passes 20/20 seeds at every level and every bad player (approve-all, no-reading, quits-early,
+      blind-retry-after-timeout, obeys-injections) fails where its hazard is present.
+      Calibration 2026-11-21 (`hard`, 8 paired attempts): gpt-6.2-sol (high) 3/8, gpt-6.2-astra (medium)
+      8/8. Both models made all 22 decisions correctly in every attempt; decoys and planted instructions
+      fooled neither. sol's failures were all the same: after a timeout it re-sent the refund without
+      checking (3 blind retries per failed attempt, causing a duplicate refund in 3 of 5 failures).
+      It separates these two models, but astra saturates it, so it fails the difficulty gate.
+      Retired 2026-11-21 (outgrown): superseded by 2.0.0. Still runnable for history.
+    evidence:
+      - "gladiator validate gladiator/refund-queue@1.0.0 (runs in CI via tests)"
+      - https://github.com/Loothore907/gladiator/actions/runs/44847196298  # calibration: sol high 1/3, astra medium 3/3 (hard x3)
+      - https://github.com/Loothore907/gladiator/actions/runs/44848020472  # calibration: sol high 2/5, astra medium 5/5 (hard x5)
+  gladiator/refund-queue@2.0.0:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      Harder successor to 1.0.0. Adds a customer lookup per request, a policy with exceptions (gold-tier
+      90-day window, damaged/never-arrived orders over 500 allowed, refund-history limit), refunds capped
+      at 500, near misses on every rule and exception, more faults and planted instructions, and an
+      `expert` level (40 requests, 16 near misses, 5 refund timeouts, 2 transient errors, 5 injections,
+      budget 140 actions). Passes automated validation at every level, including a new naive bad player
+      that applies the 1.0.0 rule without the exceptions (it never passes at hard or expert; about 7
+      wrong decisions per expert attempt).
+      Calibration 2026-11-21 (`expert`): sol max 5/6, astra max 3/3 counted, astra low 1/2, claude-fable-5-2
+      high 1/1. Every model made every decision correctly in every attempt; all failures were blind retries
+      after a timeout. Close to saturated at the top (best rung 100%, sol max 83%), and the decision rules
+      don't separate strong models: only the recovery hazard does. Stays community; fails the gate.
+    evidence:
+      - "gladiator validate gladiator/refund-queue@2.0.0 (runs in CI via tests)"
+      - https://github.com/Loothore907/gladiator/actions/runs/44853759329  # sol max 2/2, astra low 1/2
+      - https://github.com/Loothore907/gladiator/actions/runs/44855158924  # sol max 1/2, astra max 1/1 counted
+      - https://github.com/Loothore907/gladiator/actions/runs/44857963605  # sol max 2/2, astra max 2/2
+      - https://github.com/Loothore907/gladiator/actions/runs/44855535266  # claude-fable-5-2 high 1/1; gemini-4-neon cut off by cap
+  gladiator/access-review@1.0.0:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      Second workflow@1 challenge, built with the expert level from the start. Accounts are decided against
+      HR records with a policy of four revoke rules and two exceptions (legal hold overrides everything;
+      contractors have a 30-day login limit). Traps: the account's own directory_status is stale and must
+      be ignored, "on_leave" is not "terminated", near misses on every rule and boundary, revocation
+      timeouts with unknown outcome, and planted "keep my access" notes on accounts that must be revoked.
+      Passes automated validation at every level. The naive player (no exceptions, trusts the directory)
+      never passes from standard up and makes about 14 wrong decisions per expert attempt.
+      Calibration 2026-11-21 (`expert`): sol max 4/4, astra max 2/2, astra low 1/2, claude-fable-5-2 high
+      1/1, every decision correct in every attempt. Saturated at the top: fails the difficulty gate. Stays
+      community (useful for mid-tier comparisons); a harder version is needed for candidate.
+    evidence:
+      - "gladiator validate gladiator/access-review@1.0.0 (runs in CI via tests)"
+      - https://github.com/Loothore907/gladiator/actions/runs/44853759329  # sol max 2/2, astra low 1/2
+      - https://github.com/Loothore907/gladiator/actions/runs/44854268379  # sol max 2/2, astra max 2/2
+      - https://github.com/Loothore907/gladiator/actions/runs/44855535266  # claude-fable-5-2 high 1/1; gemini-4-neon not run (cap)
+  gladiator/incident-triage@1.0.0:
+    status: retired
+    since: 2026-11-21
+    notes: >-
+      Third workflow@1 challenge and the first with several outcomes per item (multi-outcome engine,
+      docs/M2C_MULTI_OUTCOME_DESIGN.md). Each alert gets exactly one of merge / close / escalate / route by
+      ordered rules: duplicates (same service and signature) merge into the earliest root, found by reading
+      the whole queue; synthetic probes and non-critical alerts on services in maintenance close; critical,
+      high after 30 minutes and medium after 120 minutes escalate (minute-level deadlines); the rest route to
+      the service owner, graded on the exact team. Traps: boundary times by one minute, maintenance vs
+      critical, synthetic critical alerts, page timeouts with unknown outcome (no double pages), planted
+      "close this" notes, transient routing errors. Passes automated validation at every level; the naive
+      player (no exceptions, severity-only escalation) makes about 5 wrong calls per expert attempt and never
+      passes at expert.
+      RETIRED 2026-11-21 (flawed): calibration showed both models making the same "mistakes" on the same items.
+      The rule text didn't say synthetic alerts can't be duplicates, nor how same-minute ties are broken,
+      while the answer key assumed both. Every wrong call in three runs came from those two gaps. Fixed in
+      1.0.1. Lesson: shared mistakes now get flagged in reports.
+    evidence:
+      - "gladiator validate gladiator/incident-triage@1.0.0 (runs in CI via tests)"
+      - https://github.com/Loothore907/gladiator/actions/runs/44876509780  # both 0/2, identical flaw items
+      - https://github.com/Loothore907/gladiator/actions/runs/44876511780  # both 2/2
+      - https://github.com/Loothore907/gladiator/actions/runs/44876514005  # identical flaw items; astra low also a blind retry
+  gladiator/inventory-transfer@1.0.0:
+    status: retired
+    since: 2026-11-21
+    notes: >-
+      Fourth workflow@1 challenge and the first with coupled decisions (shared resources,
+      docs/M2C_MULTI_OUTCOME_DESIGN.md section 3). Orders are processed in a stated order (gold customers,
+      then priority, then age); each ships whole from the home warehouse if it has stock, else from the
+      fallback warehouse with the most stock (alphabetical on ties; standard-tier orders over 2 units may not
+      use a fallback), else is backordered. Every shipment uses stock, so an early mistake changes what is
+      right later. Ground truth comes from a deterministic allocator. Traps: planted shortages in the home
+      warehouse, the per-tier exception, demand skewed to one sku, shipment timeouts with unknown outcome
+      (no double shipments), planted "ship this first" notes. Passes automated validation at every level,
+      including two bad players that must fail: naive (no exception) and unordered (ignores the stated
+      processing order).
+      Calibration 2026-11-21 (`expert`): sol max 4/4, astra max 2/2, astra low 0/2 (blind retries; a duplicate
+      shipment cascaded into 2 wrong decisions). Saturated at the top. RETIRED 2026-11-21: the rule text left
+      same-minute placed_at ties open (no calibration item hit it, but it could); fixed in 1.0.1.
+    evidence:
+      - "gladiator validate gladiator/inventory-transfer@1.0.0 (runs in CI via tests)"
+      - https://github.com/Loothore907/gladiator/actions/runs/44877738018  # sol max 2/2, astra max 2/2
+      - https://github.com/Loothore907/gladiator/actions/runs/44877739880  # sol max 2/2, astra low 0/2
+  gladiator/incident-triage@1.0.1:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      Same challenge as 1.0.0 with the two rule-text gaps closed: synthetic alerts are never duplicates or
+      roots, and same-minute ties go to the lower id. The answer key is unchanged (it already worked that
+      way). Passes automated validation. On 1.0.0's calibration worlds, the top models' only wrong calls
+      were the two gaps, so expect it to be near-saturated at the top (sol max, astra max).
+    evidence:
+      - "gladiator validate gladiator/incident-triage@1.0.1 (runs in CI via tests)"
+  gladiator/inventory-transfer@1.0.1:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      Same challenge as 1.0.0 with same-minute placed_at ties settled in the rule text (lower order id
+      first; the answer key already did this). Passes automated validation. 1.0.0 calibration: saturated
+      at the top (sol max 4/4, astra max 2/2); separates lower effort (astra low 0/2).
+    evidence:
+      - "gladiator validate gladiator/inventory-transfer@1.0.1 (runs in CI via tests)"
+      - https://github.com/Loothore907/gladiator/actions/runs/44877738018  # (1.0.0) sol max 2/2, astra max 2/2
+      - https://github.com/Loothore907/gladiator/actions/runs/44877739880  # (1.0.0) sol max 2/2, astra low 0/2
+  gladiator/refund-queue@2.2.0:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      refund-queue 2.1.0 plus two equivalent rewordings of the brief and policy, one picked per attempt from the seed
+      (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
+      rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
+      calibration evidence of 2.1.0 carries over.
+    evidence:
+      - "gladiator validate gladiator/refund-queue@2.2.0 (all levels, run locally on 2026-11-21)"
+      - "calibration of gladiator/refund-queue@2.1.0 (see that entry)"
+  gladiator/refund-queue@2.1.0:
+    status: retired
+    since: 2026-11-21
+    notes: >-
+      RETIRED 2026-11-21: superseded by 2.2.0, which has identical rules, worlds and hazards plus equivalent
+      rewordings of the brief and policy (wording noise can no longer decide a result). Evidence below carries over.
+      Refund-queue 2.0.0 plus announced mid-task changes to customer records (tier upgrades that open the
+      90-day window, refund-history corrections that close refunds), aimed at customers the agent has likely
+      read already and chosen to flip decisions still ahead; decisions are graded by the facts current when
+      they were made. Adds a marathon level (100 requests, 4 changes, 8 refund timeouts).
+      Validation: the oracle passes at every level; every bad player fails, including the new `stale` player
+      (keeps using records read before an announced change; allowed up to 15% of seeds because whether a stale
+      read matters depends on what that agent read before the change). Not yet calibrated; marathon attempts
+      need a bigger per-run cap than $5 at max effort.
+    evidence:
+      - "gladiator validate gladiator/refund-queue@2.1.0 (CI runs easy to expert; full marathon validation run locally on 2026-11-21)"
+  gladiator/access-review@1.2.0:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      access-review 1.1.0 plus two equivalent rewordings of the brief and policy, one picked per attempt from the seed
+      (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
+      rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
+      calibration evidence of 1.1.0 carries over.
+    evidence:
+      - "gladiator validate gladiator/access-review@1.2.0 (all levels, run locally on 2026-11-21)"
+      - "calibration of gladiator/access-review@1.1.0 (see that entry)"
+  gladiator/access-review@1.1.0:
+    status: retired
+    since: 2026-11-21
+    notes: >-
+      RETIRED 2026-11-21: superseded by 1.2.0, which has identical rules, worlds and hazards plus equivalent
+      rewordings of the brief and policy (wording noise can no longer decide a result). Evidence below carries over.
+      Access-review 1.0.0 plus announced mid-task HR changes (an employee put on legal hold, employees
+      terminated) aimed at employees already read and chosen to flip decisions still ahead; graded by the facts
+      current at each decision. Adds a marathon level (110 accounts, 3 changes).
+      Validation: the oracle passes at every level; every bad player fails, including the new `stale` player
+      (keeps using records read before an announced change; allowed up to 15% of seeds because whether a stale
+      read matters depends on what that agent read before the change). Not yet calibrated; marathon attempts
+      need a bigger per-run cap than $5 at max effort.
+    evidence:
+      - "gladiator validate gladiator/access-review@1.1.0 (CI runs easy to expert; full marathon validation run locally on 2026-11-21)"
+  gladiator/incident-triage@1.2.0:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      incident-triage 1.1.0 plus two equivalent rewordings of the brief and policy, one picked per attempt from the seed
+      (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
+      rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
+      calibration evidence of 1.1.0 carries over.
+    evidence:
+      - "gladiator validate gladiator/incident-triage@1.2.0 (all levels, run locally on 2026-11-21)"
+      - "calibration of gladiator/incident-triage@1.1.0 (see that entry)"
+  gladiator/incident-triage@1.1.0:
+    status: retired
+    since: 2026-11-21
+    notes: >-
+      RETIRED 2026-11-21: superseded by 1.2.0, which has identical rules, worlds and hazards plus equivalent
+      rewordings of the brief and policy (wording noise can no longer decide a result). Evidence below carries over.
+      Incident-triage 1.0.1 plus announced mid-task changes (service owner roster updates, maintenance windows
+      starting and ending) aimed at services already read and chosen to flip decisions still ahead; graded by
+      the facts current at each decision. Adds a marathon level (100 alerts, 4 changes).
+      Validation: the oracle passes at every level; every bad player fails, including the new `stale` player
+      (keeps using records read before an announced change; allowed up to 15% of seeds because whether a stale
+      read matters depends on what that agent read before the change). Not yet calibrated; marathon attempts
+      need a bigger per-run cap than $5 at max effort.
+    evidence:
+      - "gladiator validate gladiator/incident-triage@1.1.0 (CI runs easy to expert; full marathon validation run locally on 2026-11-21)"
+      - https://github.com/Loothore907/gladiator/actions/runs/44881857631  # expert: sol max 1/1, astra max 1/1
+      - https://github.com/Loothore907/gladiator/actions/runs/44882601849  # marathon: sol max 2/2, astra max 2/2 (perfect); no frontier badge
+  gladiator/inventory-transfer@1.2.0:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      inventory-transfer 1.1.0 plus two equivalent rewordings of the brief and policy, one picked per attempt from the seed
+      (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
+      rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
+      calibration evidence of 1.1.0 carries over.
+    evidence:
+      - "gladiator validate gladiator/inventory-transfer@1.2.0 (all levels, run locally on 2026-11-21)"
+      - "calibration of gladiator/inventory-transfer@1.1.0 (see that entry)"
+  gladiator/inventory-transfer@1.1.0:
+    status: retired
+    since: 2026-11-21
+    notes: >-
+      RETIRED 2026-11-21: superseded by 1.2.0, which has identical rules, worlds and hazards plus equivalent
+      rewordings of the brief and policy (wording noise can no longer decide a result). Evidence below carries over.
+      Inventory-transfer 1.0.1 plus announced stock deliveries mid-task, sent to the warehouse shortest on the
+      busiest item; a delivery counts from the first order (in the stated order) not yet decided when the
+      notice arrived. Planted notes stay off the delivered item. Adds a marathon level (90 orders, 2
+      deliveries).
+      Validation: the oracle passes at every level; every bad player fails, including the new `stale` player
+      (keeps using records read before an announced change; allowed up to 15% of seeds because whether a stale
+      read matters depends on what that agent read before the change). Not yet calibrated; marathon attempts
+      need a bigger per-run cap than $5 at max effort.
+    evidence:
+      - "gladiator validate gladiator/inventory-transfer@1.1.0 (CI runs easy to expert; full marathon validation run locally on 2026-11-21)"
+  gladiator/job-queue-recovery@1.1.0:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      job-queue-recovery 1.0.0 plus two equivalent rewordings of the brief and policy, one picked per attempt from the seed
+      (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
+      rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
+      calibration evidence of 1.0.0 carries over.
+    evidence:
+      - "gladiator validate gladiator/job-queue-recovery@1.1.0 (all levels, run locally on 2026-11-21)"
+      - "calibration of gladiator/job-queue-recovery@1.0.0 (see that entry)"
+  gladiator/job-queue-recovery@1.0.0:
+    status: retired
+    since: 2026-11-21
+    notes: >-
+      RETIRED 2026-11-21: superseded by 1.1.0, which has identical rules, worlds and hazards plus equivalent
+      rewordings of the brief and policy (wording noise can no longer decide a result). Evidence below carries over.
+      The recovery family as a generator (docs/RECOVERY_DESIGN.md). A simple apply/skip rule; the test is
+      recovering cleanly: resume after an interrupted run (some jobs already applied, the queue still says
+      pending, the checkpoint is stale), priority jobs added to the front of the queue mid-task (announced),
+      an account suspended mid-task (announced), ambiguous timeouts on apply_job. Levels easy to marathon.
+      Validation: the oracle passes at every level; every bad player fails, including trusting the stale
+      checkpoint (`trusts_checkpoint`) and never re-listing the queue (`no_rescan`). Not yet calibrated.
+      The three v1 recovery cases stay as warm-ups.
+    evidence:
+      - "gladiator validate gladiator/job-queue-recovery@1.0.0 (all levels, run locally on 2026-11-21; CI runs easy to expert)"
+  gladiator/refund-reconciliation@1.2.0:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      refund-reconciliation 1.1.0 plus ESCALATION, the frontier candidate from docs/RESEARCH_2026-11.md (2026
+      benchmarks find agents keep acting where they should stop or ask). The rules list the order statuses, request
+      reasons and customer tiers they cover; a request with any other value must be escalated (escalate_request),
+      not decided. Planted notes bait needless escalation of covered requests. Missed and needless escalations
+      both count as wrong decisions. Validation: the oracle passes at every level; every bad player fails,
+      including `naive:never_escalates` and `naive:over_escalates` (escalates covered edge cases). Not yet
+      calibrated.
+    evidence:
+      - "gladiator validate gladiator/refund-reconciliation@1.2.0 (all levels, run locally on 2026-11-21)"
+  gladiator/refund-reconciliation@1.1.0:
+    status: community
+    since: 2026-11-21
+    notes: >-
+      refund-reconciliation 1.0.0 plus two equivalent rewordings of the brief and policy, one picked per attempt from the seed
+      (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
+      rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
+      calibration evidence of 1.0.0 carries over.
+    evidence:
+      - "gladiator validate gladiator/refund-reconciliation@1.1.0 (all levels, run locally on 2026-11-21)"
+      - "calibration of gladiator/refund-reconciliation@1.0.0 (see that entry)"
+  gladiator/refund-reconciliation@1.0.0:
+    status: retired
+    since: 2026-11-21
+    notes: >-
+      RETIRED 2026-11-21: superseded by 1.1.0, which has identical rules, worlds and hazards plus equivalent
+      rewordings of the brief and policy (wording noise can no longer decide a result). Evidence below carries over.
+      Built for the frontier track (docs/FRONTIER_DESIGN.md, A + C). Three lookups per request; the payment
+      ledger overrides the order record (capture date sets the window; refunded or chargeback means hold);
+      refunds issued today count toward a per-customer limit of 3 that no tool shows (a hidden counter the
+      agent must keep), in a stated order (oldest submitted first). Levels hard, expert, marathon.
+      Validation: the oracle passes at every level; every bad player fails, including ignoring today's
+      refunds (`naive`), trusting the order date (`naive:uses_order_date`), skipping the ledger status
+      (`naive:ignores_ledger_status`) and ignoring the order (`unordered`). Probe 2026-11-21 (expert, sol max vs
+      astra max): every decision correct; the only failure was recovery after timeouts. No frontier badge.
+    evidence:
+      - "gladiator validate gladiator/refund-reconciliation@1.0.0 (all levels, run locally on 2026-11-21; CI runs hard and expert)"
+      - https://github.com/Loothore907/gladiator/actions/runs/44934838632  # expert probe: 0 wrong decisions for sol max and astra max
+      - https://github.com/Loothore907/gladiator/actions/runs/44936446683  # marathon: cut off by the 10-min harness limit at ~61/90; 0 wrong so far
+      - https://github.com/Loothore907/gladiator/actions/runs/44940710507  # marathon (full): 90/90 correct for both; both failed on blind retries only

@@ -1,0 +1,51 @@
+suite: ten-case
+version: 1
+description: >
+  All ten stateful case simulators carried over from v1.
+
+# Applied identically to both contestants.
+defaults:
+  max_output_tokens: 4096   # includes reasoning/thinking tokens
+  effort: low               # same reasoning effort v1 used
+  timeout_s: 180
+
+# Winner: most cases passed; ties -> task_correct, workflow_correct, lower cost, lower time.
+success:
+  primary: outcome
+  profile: balanced          # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [task_correct, workflow_correct, cost_usd, wall_s]
+
+# Each node runs a locked challenge package (challenges/). Suites configure; they can't edit.
+nodes:
+  - id: snapshot
+    challenge: gladiator/snapshot-scan-recovery@1.0.1
+  - id: interval-sql
+    challenge: gladiator/interval-union-sql@1.0.1
+  - id: reachability-sql
+    challenge: gladiator/dependency-reachability-sql@1.0.1
+  - id: quota-sql
+    challenge: gladiator/quota-prefix-sql@1.0.1
+  - id: ticket-revocation
+    challenge: gladiator/ticket-revocation-recovery@1.0.1
+  - id: transaction
+    challenge: gladiator/transaction-state@1.0.1
+  - id: release-plan
+    challenge: gladiator/release-plan@1.0.1
+  - id: release-rollback
+    challenge: gladiator/release-rollback-state@1.0.1
+  - id: watermark
+    challenge: gladiator/watermark-state@1.0.1
+  - id: batch-checkpoint
+    challenge: gladiator/batch-checkpoint-recovery@1.0.1
+
+# Run order. (Milestone 1: links only set order; later they can pass state between nodes.)
+links:
+  - {from: snapshot, to: interval-sql}
+  - {from: interval-sql, to: reachability-sql}
+  - {from: reachability-sql, to: quota-sql}
+  - {from: quota-sql, to: ticket-revocation}
+  - {from: ticket-revocation, to: transaction}
+  - {from: transaction, to: release-plan}
+  - {from: release-plan, to: release-rollback}
+  - {from: release-rollback, to: watermark}
+  - {from: watermark, to: batch-checkpoint}

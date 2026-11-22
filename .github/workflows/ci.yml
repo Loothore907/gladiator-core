@@ -1,0 +1,61 @@
+# Runs on every push and pull request. Offline only: no API keys, no cost.
+# Linux is the official target (required). Windows is checked so local development stays healthy.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+      - run: uv sync --frozen
+      - name: Offline tests
+        run: uv run pytest -v
+      - name: End-to-end match with offline contestants
+        shell: bash
+        run: |
+          uv run gladiator match --suite suites/ten_case.yaml --a scripted:golden --b scripted:invalid --max-usd 1 | tee match.txt
+          grep -q "Cases passed | 10/10 | 0/10" match.txt
+          uv run gladiator verify runs/*/
+
+  container:
+    name: Linux container
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: docker build -t gladiator:ci .
+      - name: Match inside the container
+        run: |
+          docker run --rm gladiator:ci match --suite suites/ten_case.yaml --a scripted:golden --b scripted:invalid --max-usd 1 | tee match.txt
+          grep -q "Cases passed | 10/10 | 0/10" match.txt

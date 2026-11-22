@@ -1,0 +1,22 @@
+suite: marathon-frontier
+version: 1
+description: >
+  The frontier test at the marathon level: refund-reconciliation with 90 requests, the payment ledger
+  overriding the order record and a hidden per-customer quota the agent must track the whole way. For probing
+  whether length stumps top models. Expensive at high effort.
+
+defaults:
+  max_output_tokens: 8192   # includes reasoning/thinking tokens
+  effort: high
+  timeout_s: 300
+  difficulty: marathon
+  attempt_time_limit_s: 2700   # 45 min per attempt (default 600 cut marathon attempts short, 2026-11-21)
+
+success:
+  primary: outcome
+  profile: balanced          # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [passed, task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: refund-reconciliation
+    challenge: gladiator/refund-reconciliation@1.2.0

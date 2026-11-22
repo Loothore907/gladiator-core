@@ -1,0 +1,20 @@
+suite: probe
+version: 1
+description: >
+  One small multi-tool case (refund-queue 2.0.0 at easy). For checking cheaply that a model accepts a
+  setting (e.g. an effort level) before spending on a real match. Not a comparison.
+
+defaults:
+  max_output_tokens: 8192   # includes reasoning/thinking tokens
+  effort: low
+  timeout_s: 300
+  difficulty: easy
+
+success:
+  primary: outcome
+  profile: balanced          # balanced | budget | latency (scorers/efficiency.py)
+  tiebreak: [task_correct, workflow_correct, cost_usd, wall_s]
+
+nodes:
+  - id: refund-queue
+    challenge: gladiator/refund-queue@2.0.0
