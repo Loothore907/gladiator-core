@@ -3,6 +3,11 @@
 Gladiator is an open (Apache-2.0) head-to-head model evaluation engine: two models play the same suite under
 identical settings, and the result is a claim about that task, with how sure we are.
 
+## Standing permissions (owner, 2026-11-22)
+Claude may open PRs into `main` from a feature branch and **merge its own PRs once CI is green** on the current
+head (squash merge), without asking. Fix red CI first; never skip or disable a test to get green. Ask first before
+merging a PR Claude did not open, or changing repo settings or secrets.
+
 ## Product direction
 Read `docs/PRODUCT.md` before designing features: vision (community library of trusted tests), MVP scope,
 challenge packages, trust tiers and validation, run records, contamination policy, fairness rules and the
