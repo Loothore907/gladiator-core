@@ -34,10 +34,15 @@ uv run python gladiator.py serve                      # this machine only, your 
 ```
 - A race is built from safe choices only: a task from the base suite's locked challenges, two models from the
   server's list, a difficulty level and a scoring profile. Free text never reaches the engine.
-- Money is guarded three times: a hard cap per race, a total the server will not go past (a race starts only if
-  its whole cap still fits), and one race at a time.
-- With no access codes (`GLADIATOR_RACE_CODES`) it refuses to listen beyond this machine. With codes, each code
-  has a limit on the races it may start.
+- Money is guarded three times: a hard cap per race, limits the server will not go past (a race starts only if
+  its whole cap still fits), and one race at a time. The limits are a total (`--total-usd`), a budget per
+  provider (`--provider-usd openrouter=30`, repeatable), or both. A model is offered only while its provider
+  can cover one more race and this server holds that provider's key; `/options` shows each budget and what is
+  left of it.
+- With no invites (`GLADIATOR_RACE_CODES`, comma-separated; `invite:40` gives one its own number of races) it
+  refuses to listen beyond this machine. An invite is exchanged once for a session (`POST /signin`) that lasts
+  30 days; a browser then needs only the session. Sessions are signed with a key made from the invites, so
+  changing the invites signs everyone out. The ledger file records a sign-in by an id, never the invite.
 - A browser page on another address must be named with `--origin`.
 
 ## Rules for any hosted environment
