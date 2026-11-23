@@ -57,6 +57,13 @@ class Ledger:
         if self.path.exists():
             self.state.update(json.loads(self.path.read_text(encoding="utf-8")))
             self.state["held_usd"] = 0.0  # nothing is running at start-up
+        try:
+            self._save()  # a limit that cannot be written down is not a limit: fail now, not after the first race
+        except OSError as e:
+            raise SystemExit(
+                f"Cannot write the spending ledger at {self.path}: {e}. "
+                "The runner will not start without a place to record what it spends."
+            ) from None
 
     def _save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)

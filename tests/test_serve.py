@@ -56,6 +56,14 @@ class RulesTests(unittest.TestCase):
             again = serve.Ledger(Path(tmp) / "l.json", total_usd=0.5, runs_per_code=2)
             self.assertAlmostEqual(again.left(), 0.45)
 
+    def test_it_will_not_start_if_it_cannot_record_what_it_spends(self):
+        with TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "a-file"
+            blocker.write_text("not a folder")
+            with self.assertRaises(SystemExit) as stopped:
+                serve.Ledger(blocker / "ledger.json", total_usd=1.0, runs_per_code=1)
+            self.assertIn("spending ledger", str(stopped.exception))
+
     def test_without_codes_it_listens_on_this_machine_only(self):
         with TemporaryDirectory() as tmp, self.assertRaises(SystemExit):
             serve.serve(make(tmp), "0.0.0.0", 0)
