@@ -13,6 +13,7 @@ the only guard is the hard --max-usd cap.
 
 import argparse
 import json
+import os
 import secrets
 import sys
 import threading
@@ -28,6 +29,16 @@ from engine import record, runner
 from engine import suite as suites
 from reports import markdown
 from scorers import components
+
+# The models a live race may use unless told otherwise: small and cheap, each with a listed or published price.
+DEFAULT_RACE_MODELS = [
+    "anthropic:claude-haiku-5-5",
+    "openai:gpt-6-luna",
+    "openrouter:deepseek/deepseek-v4.1-flash-1017",
+    "openrouter:minimax/minimax-m3.1-flash",
+    "openrouter:qwen/qwen3.8-27b",
+    "openrouter:z-ai/glm-5.3",
+]
 
 
 def event_writer(target: str | None):
@@ -89,6 +100,30 @@ def cmd_match(args):
     if crashed:
         print(f"ERROR: {len(crashed)} case(s) hit an unexpected error (a bug, not a model result). See report.")
         sys.exit(2)
+
+
+def cmd_serve(args):
+    from engine import serve
+
+    codes = {c.strip() for c in os.environ.get("GLADIATOR_RACE_CODES", "").split(",") if c.strip()} or None
+    models = args.model or DEFAULT_RACE_MODELS
+    state = Path(args.state)
+    ledger = serve.Ledger(state / "race_ledger.json", args.total_usd, args.runs_per_code)
+    races = serve.Races(
+        args.suite, models, ledger, args.max_usd, codes, set(args.origin or []), runs_dir=state / "runs"
+    )
+    server = serve.serve(races, args.host, args.port)
+    who = f"{len(codes)} access code(s)" if codes else "no access codes: this machine only"
+    print(
+        f"Gladiator race runner on http://{args.host}:{server.server_address[1]}  ({who})\n"
+        f"  tasks: {', '.join(races.tasks)}\n  models: {', '.join(models)}\n"
+        f"  cap ${args.max_usd:.2f} per race, ${ledger.left():.2f} left of ${args.total_usd:.2f} in total",
+        flush=True,
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("Stopped.")
 
 
 def cmd_verify(args):
@@ -269,6 +304,28 @@ def main(argv=None):
         "for a live view of the match. Public facts only.",
     )
     m.set_defaults(func=cmd_match)
+
+    sv = sub.add_parser("serve", help="race runner: start one match over HTTP and stream it as it happens")
+    sv.add_argument(
+        "--suite",
+        default="suites/small_tier.yaml",
+        help="base suite: its challenges and settings are what a race can use",
+    )
+    sv.add_argument(
+        "--model", action="append", help="a model a race may use (repeatable); default: the small, cheap set"
+    )
+    sv.add_argument("--max-usd", type=float, default=0.25, help="hard cap for one race in USD (half per model)")
+    sv.add_argument(
+        "--total-usd", type=float, default=5.0, help="stop starting races once this much has been spent in total"
+    )
+    sv.add_argument("--runs-per-code", type=int, default=10, help="live races one access code may start")
+    sv.add_argument(
+        "--origin", action="append", help="a web origin allowed to call this server from a browser (repeatable)"
+    )
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8787)
+    sv.add_argument("--state", default="race_state", help="folder for the spending ledger and the races' records")
+    sv.set_defaults(func=cmd_serve)
 
     v = sub.add_parser("verify", help="check a run folder's hashes")
     v.add_argument("run_dir")

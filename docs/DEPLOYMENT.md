@@ -23,6 +23,23 @@ This same image is the **enterprise / benchmark-environment** form. It needs:
 - Behind a corporate proxy with its own security certificate: build on the organisation's approved base
   image with `docker build --build-arg BASE=<their python 3.12 image> .`
 
+## The race runner (for a live view)
+
+`gladiator serve` is the one form of this image that takes inbound requests: it starts a single match over HTTP
+and streams it as it happens (`engine/serve.py`). It still needs no database: its only state is a small spending
+ledger file and the records of the races it ran.
+
+```bash
+uv run python gladiator.py serve                      # this machine only, your own keys from .env
+```
+- A race is built from safe choices only: a task from the base suite's locked challenges, two models from the
+  server's list, a difficulty level and a scoring profile. Free text never reaches the engine.
+- Money is guarded three times: a hard cap per race, a total the server will not go past (a race starts only if
+  its whole cap still fits), and one race at a time.
+- With no access codes (`GLADIATOR_RACE_CODES`) it refuses to listen beyond this machine. With codes, each code
+  has a limit on the races it may start.
+- A browser page on another address must be named with `--origin`.
+
 ## Rules for any hosted environment
 
 1. **One environment per purpose.** No parallel staging copies, preview environments or "campaign" layers
