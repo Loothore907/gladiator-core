@@ -69,6 +69,91 @@ class MatchTests(unittest.TestCase):
         self.assertEqual(v["totals"]["B"]["passed"], 0)
         self.assertEqual(len(operator["A"]), 10)
 
+    def test_a_listener_hears_every_step_as_it_happens_and_cannot_change_the_match(self):
+        events = []
+        body, operator = quiet(
+            runner.run_match,
+            suites.load(SIX),
+            "scripted:golden",
+            "scripted:silent",
+            1.0,
+            None,
+            2,
+            on_event=events.append,
+        )
+        kinds = [e["event"] for e in events]
+        self.assertEqual((kinds[0], kinds[-1]), ("match_start", "match_end"))
+        self.assertEqual(events[0]["models"], {"A": "scripted:golden", "B": "scripted:silent"})
+        for side in ("A", "B"):
+            results = body["contestants"][side]["results"]
+            mine = [e for e in events if e.get("side") == side]
+            # one start and one end per attempt, and one step per recorded turn, in the order they were played
+            self.assertEqual(sum(e["event"] == "attempt_start" for e in mine), len(results))
+            ends = [e for e in mine if e["event"] == "attempt_end"]
+            self.assertEqual(
+                [(e["node"], e["attempt"], e["passed"]) for e in ends],
+                [(r["node"], r["attempt"], bool(r["passed"])) for r in results],
+            )
+            steps = [(e["node"], e["attempt"], e["turn"], e["tool_name"]) for e in mine if e["event"] == "step"]
+            turns = [(r["node"], r["attempt"], t["turn"], t["tool_name"]) for r in results for t in r["turns"]]
+            self.assertEqual(steps, turns)
+            # the end of an attempt carries the public grade only, exactly as the record holds it
+            self.assertEqual([e["grade_details"] for e in ends], [r["grade_details"] for r in results])
+        self.assertTrue(any(e["event"] == "step" and e["tool_name"] is None for e in events))  # the silent model
+        # an event carries a fixed set of public fields and nothing else: the answer side has no way in
+        allowed = {
+            "match_start": {"suite", "models", "nodes", "repeats", "cap_usd"},
+            "attempt_start": {"side", "model", "node", "attempt", "name", "challenge"},
+            "step": {
+                "side",
+                "model",
+                "node",
+                "attempt",
+                "turn",
+                "tool_name",
+                "tool_args",
+                "error",
+                "call_s",
+                "cost_usd",
+                "tokens",
+                "elapsed_s",
+            },
+            "attempt_end": {
+                "side",
+                "model",
+                "node",
+                "attempt",
+                "passed",
+                "termination",
+                "calls",
+                "cost_usd",
+                "wall_s",
+                "grade_details",
+            },
+            "match_end": {"spent_usd", "wall_s"},
+        }
+        for e in events:
+            self.assertEqual(set(e) - {"event", "t"}, allowed[e["event"]], e["event"])
+        private = {k for op in operator["A"] + operator["B"] for k in op["grade_details"]} - {
+            k
+            for r in body["contestants"]["A"]["results"] + body["contestants"]["B"]["results"]
+            for k in r["grade_details"]
+        }
+        told = {k for e in events if e["event"] == "attempt_end" for k in e["grade_details"]}
+        self.assertFalse(private & told)
+
+        # a listener that fails every time changes nothing about the result
+        def broken(event):
+            raise RuntimeError("listener down")
+
+        again, _ = quiet(
+            runner.run_match, suites.load(SIX), "scripted:golden", "scripted:silent", 1.0, None, 2, on_event=broken
+        )
+        self.assertEqual(
+            [r["passed"] for r in again["contestants"]["A"]["results"]],
+            [r["passed"] for r in body["contestants"]["A"]["results"]],
+        )
+
     def test_same_model_both_sides_is_a_draw(self):
         body, _ = quiet(runner.run_match, suites.load(SIX), "scripted:golden", "scripted:golden", 1.0)
         v = components.verdict(body)

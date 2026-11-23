@@ -15,6 +15,7 @@ import argparse
 import json
 import secrets
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -27,6 +28,21 @@ from engine import record, runner
 from engine import suite as suites
 from reports import markdown
 from scorers import components
+
+
+def event_writer(target: str | None):
+    """Where a match's live events go: nowhere, standard output ("-") or a file, one JSON object per line."""
+    if not target:
+        return None, lambda: None
+    out = sys.stdout if target == "-" else open(target, "w", encoding="utf-8")  # noqa: SIM115  closed by the caller
+    lock = threading.Lock()
+
+    def write(event: dict):
+        with lock:  # two contestants report from two threads
+            out.write(json.dumps(event, separators=(",", ":"), ensure_ascii=False, default=str) + "\n")
+            out.flush()
+
+    return write, (lambda: None) if target == "-" else out.close
 
 
 def cmd_match(args):
@@ -49,7 +65,13 @@ def cmd_match(args):
             for side, value in (("A", args.a_effort), ("B", args.b_effort))
             if value is not None
         }
-        body, operator = runner.run_match(s, args.a, args.b, args.max_usd, overrides, args.repeats, sides)
+        listener, close = event_writer(args.events)
+        try:
+            body, operator = runner.run_match(
+                s, args.a, args.b, args.max_usd, overrides, args.repeats, sides, on_event=listener
+            )
+        finally:
+            close()
     except ValueError as e:  # bad contestant string or missing price: nothing was spent
         raise SystemExit(f"Not started: {e}") from None
     body["run_id"] = run_id
@@ -240,6 +262,12 @@ def main(argv=None):
     m.add_argument("--a-effort", choices=efforts, help="effort for A only (flagged)")
     m.add_argument("--b-effort", choices=efforts, help="effort for B only (flagged)")
     m.add_argument("--repeats", type=int, help="play each case this many times (fresh session each time); default 1")
+    m.add_argument(
+        "--events",
+        metavar="FILE",
+        help="write what happens as it happens, one JSON object per line, to FILE (or - for standard output): "
+        "for a live view of the match. Public facts only.",
+    )
     m.set_defaults(func=cmd_match)
 
     v = sub.add_parser("verify", help="check a run folder's hashes")
