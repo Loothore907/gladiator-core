@@ -75,6 +75,24 @@ def say(msg: str):
         print(msg, flush=True)
 
 
+def emitter(on_event, **common):
+    """Wrap a caller's event callback so the match can report what happens as it happens (for a live view).
+
+    Events carry only what both contestants' public records will hold: never the answer side. The callback is
+    called from two threads (one per contestant) and must not be able to hurt the match: whatever it raises is
+    swallowed, and with no callback every emit is a no-op."""
+    if on_event is None:
+        return lambda kind, **fields: None
+
+    def emit(kind: str, **fields):
+        try:
+            on_event({"event": kind, "t": round(time.time(), 3), **common, **fields})
+        except Exception:  # noqa: BLE001  a broken listener must never stop or change a match
+            pass
+
+    return emit
+
+
 def node_settings(suite: dict, node: dict, overrides: dict) -> Settings:
     merged = {**suite["defaults"], **node["settings"], **overrides}
     known = {k: merged[k] for k in ("max_output_tokens", "effort", "timeout_s") if k in merged}
@@ -107,7 +125,9 @@ def run_node(
     settings: Settings,
     instance: dict | None = None,
     limits: dict | None = None,
+    emit=None,
 ) -> tuple[dict, dict]:
+    emit = emit or (lambda kind, **fields: None)
     module = modules.load(node["module"], node["params"], instance)
     uses_instance = getattr(module, "uses_instances", False)
     packet = module.start()
@@ -162,16 +182,34 @@ def run_node(
             "response_id": reply.response_id,
         }
         turns.append(record)
+
+        def step(observed=None, record=record):
+            failed = observed.get("error") if isinstance(observed, dict) else None
+            emit(
+                "step",
+                turn=record["turn"],
+                tool_name=record["tool_name"],
+                tool_args=record["tool_args"],
+                error=failed,
+                call_s=record["call_s"],
+                cost_usd=record["cost_usd"],
+                tokens=record["usage"]["input_tokens"] + record["usage"]["output_tokens"],
+                elapsed_s=round(time.monotonic() - started, 3),
+            )
+
         if reply.tool_name is None:
             termination = "no_action"
+            step()
             break
         try:
             observation = module.act(reply.tool_name, reply.tool_args, reply.action_json)
         except (ValueError, TypeError) as e:  # e.g. action over the simulator's size limit
             record["observation"] = {"error": f"rejected by simulator: {e}"}
             termination = "invalid_action"
+            step(record["observation"])
             break
         record["observation"] = observation
+        step(observation)
         observation_text = canonical(observation)
         if not module.last_action_valid:
             termination = "invalid_action"
@@ -271,7 +309,14 @@ def not_run(node: dict, reason: str, attempt: int = 1) -> dict:
 
 
 def run_contestant(
-    side: str, contestant: str, suite: dict, budget: Budget, overrides: dict, repeats: int = 1, salt: int = 0
+    side: str,
+    contestant: str,
+    suite: dict,
+    budget: Budget,
+    overrides: dict,
+    repeats: int = 1,
+    salt: int = 0,
+    on_event=None,
 ):
     """Play every node `repeats` times (a fresh session each time). Results are node-major:
     node1 attempt1..N, node2 attempt1..N, ... so both contestants' lists line up pair by pair."""
@@ -288,6 +333,8 @@ def run_contestant(
             if budget.refused:
                 results.append(not_run(node, "budget cap reached", attempt))
                 continue
+            emit = emitter(on_event, side=side, model=contestant, node=node["id"], attempt=attempt)
+            emit("attempt_start", name=node["name"], challenge=node["provenance"])
             try:
                 instance = instance_for(salt, node, attempt, suite, overrides)
                 public, op = run_node(
@@ -299,18 +346,30 @@ def run_contestant(
                     node_settings(suite, node, overrides),
                     instance,
                     attempt_limits(suite, node, overrides),
+                    emit,
                 )
             except FatalProviderError as e:
+                emit("attempt_end", passed=False, termination="not_run", error=str(e))
                 dead = str(e)
                 say(f"  [{side}] {contestant}: stopping - {dead}")
                 results.append(not_run(node, dead, attempt))
                 continue
             except Exception as e:  # a bug or unexpected SDK error: record it, keep the run going
                 dead = f"unexpected error: {type(e).__name__}: {e}"
+                emit("attempt_end", passed=False, termination="not_run", error=dead)
                 say(f"  [{side}] {contestant}: {dead}\n{traceback.format_exc()}")
                 results.append(not_run(node, dead, attempt))
                 continue
             public["attempt"] = op["attempt"] = attempt
+            emit(
+                "attempt_end",
+                passed=bool(public["passed"]),
+                termination=public["termination"],
+                calls=public["calls"],
+                cost_usd=public["cost_usd"],
+                wall_s=public["wall_s"],
+                grade_details=public["grade_details"],  # the public half only, as the record will hold it
+            )
             results.append(public)
             operator.append(op)
             verdict = "PASS" if public["passed"] else "fail"
@@ -330,8 +389,12 @@ def run_match(
     overrides: dict | None = None,
     repeats: int | None = None,
     side_overrides: dict | None = None,
+    on_event=None,
 ):
-    """side_overrides: optional per-contestant settings, e.g. {"A": {"effort": "high"}, "B": {"effort": "medium"}}.
+    """on_event: optional callback given one dict per event while the match runs (match_start, attempt_start,
+    step, attempt_end, match_end), for a live view. It sees only public facts and cannot affect the match.
+
+    side_overrides: optional per-contestant settings, e.g. {"A": {"effort": "high"}, "B": {"effort": "medium"}}.
     Default is identical settings for both (a fair head-to-head). Unequal settings are allowed for calibration
     or "each at its recommended setting" comparisons, and are always flagged in the record and report."""
     overrides = overrides or {}
@@ -353,11 +416,21 @@ def run_match(
     budgets = {"A": Budget(max_usd / 2), "B": Budget(max_usd / 2)}
     salt = random.SystemRandom().randrange(2**32)  # one per match: both contestants get identical instances
     started = time.time()
+    announce = emitter(on_event)
+    announce(
+        "match_start",
+        suite=suite["suite"],
+        models={"A": contestant_a, "B": contestant_b},
+        nodes=list(suite["order"]),
+        repeats=repeats,
+        cap_usd=max_usd,
+    )
     with ThreadPoolExecutor(max_workers=2) as pool:
-        fa = pool.submit(run_contestant, "A", contestant_a, suite, budgets["A"], per_side["A"], repeats, salt)
-        fb = pool.submit(run_contestant, "B", contestant_b, suite, budgets["B"], per_side["B"], repeats, salt)
+        fa = pool.submit(run_contestant, "A", contestant_a, suite, budgets["A"], per_side["A"], repeats, salt, on_event)
+        fb = pool.submit(run_contestant, "B", contestant_b, suite, budgets["B"], per_side["B"], repeats, salt, on_event)
         results_a, operator_a = fa.result()
         results_b, operator_b = fb.result()
+    announce("match_end", spent_usd=budgets["A"].spent + budgets["B"].spent, wall_s=round(time.time() - started, 1))
 
     first = get_node(suite, suite["order"][0])
     sample = {s: node_settings(suite, first, per_side[s]) for s in ("A", "B")}
