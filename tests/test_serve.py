@@ -56,6 +56,67 @@ class RulesTests(unittest.TestCase):
             again = serve.Ledger(Path(tmp) / "l.json", total_usd=0.5, runs_per_code=2)
             self.assertAlmostEqual(again.left(), 0.45)
 
+    def test_each_provider_has_its_own_budget_and_a_spent_one_takes_its_models_off_the_list(self):
+        with TemporaryDirectory() as tmp:
+            # "scripted" stands in for a provider here; 0.3 covers one race at a 0.2 cap, not two
+            ledger = serve.Ledger(Path(tmp) / "l.json", None, 5, by_provider={"scripted": 0.3})
+            races = serve.Races(SIX, MODELS, ledger, 0.2, {"judge-1"}, set(), runs_dir=Path(tmp) / "runs")
+            self.assertEqual(races.options()["models"], MODELS)
+            self.assertEqual(races.options()["budgets"], [{"provider": "scripted", "limit_usd": 0.3, "left_usd": 0.3}])
+            ledger.hold(0.2, "x", ("scripted", "scripted"))  # two models of one provider: one hold, not two
+            self.assertAlmostEqual(ledger.left_for("scripted"), 0.1)
+            with self.assertRaises(serve.Refused) as full:
+                ledger.hold(0.2, "y", ("scripted",))
+            self.assertEqual(full.exception.status, 402)
+            ledger.settle(0.2, 0.15, ("scripted", "scripted"), {"scripted": 0.15})
+            self.assertAlmostEqual(ledger.left_for("scripted"), 0.15)
+            # what is left cannot cover one more race: every model of that provider leaves the list
+            options = races.options()
+            self.assertEqual((options["models"], options["models_out"]), ([], MODELS))
+            task = next(iter(races.tasks))
+            with self.assertRaises(serve.Refused) as out:
+                races.check({"task": task, "a": MODELS[0], "b": MODELS[1], "code": "judge-1"})
+            self.assertEqual(out.exception.status, 402)
+            # a provider with no budget has nothing to spend when budgets are the only limits
+            self.assertEqual(ledger.left_for("openai"), 0.0)
+            # a match that died is counted in full, split over its providers
+            two = serve.Ledger(Path(tmp) / "m.json", None, 5, by_provider={"openai": 1.0, "google": 1.0})
+            two.hold(0.2, "x", ("openai", "google"))
+            two.settle(0.2, 0.2, ("openai", "google"), None)
+            self.assertAlmostEqual(two.left_for("openai"), 0.9)
+            self.assertAlmostEqual(two.left_for("google"), 0.9)
+            with self.assertRaises(SystemExit):
+                serve.Ledger(Path(tmp) / "n.json", None, 5)  # no limit of any kind
+
+    def test_an_invite_is_exchanged_for_a_session_and_nothing_else_gets_in(self):
+        with TemporaryDirectory() as tmp:
+            ledger = serve.Ledger(Path(tmp) / "l.json", 1.0, 3, limits={serve.who_of("owner"): 7})
+            races = serve.Races(SIX, MODELS, ledger, 0.2, {"judge-1", "owner"}, set(), runs_dir=Path(tmp) / "runs")
+            session = races.sign_in({"invite": "judge-1"})
+            self.assertEqual(session["races_left"], 3)
+            self.assertEqual(races.sign_in({"invite": "owner"})["races_left"], 7)  # an invite with its own limit
+            task = next(iter(races.tasks))
+            ask = {"task": task, "a": MODELS[0], "b": MODELS[1]}
+            # the session alone is enough for a race, and it is the same sign-in as the invite
+            self.assertEqual(races.check({**ask, "token": session["token"]})["who"], serve.who_of("judge-1"))
+            self.assertEqual(races.sign_in({"token": session["token"]})["races_left"], 3)  # renewing it
+            packed, signature = session["token"].split(".")
+            forged = packed + "." + ("0" if signature[0] != "0" else "1") + signature[1:]
+            for bad in ({}, {"token": forged}, {"token": "x.y"}, {"token": "nonsense"}, {"invite": "nope"}):
+                with self.assertRaises(serve.Refused) as refused:
+                    races.check({**ask, **bad})
+                self.assertEqual(refused.exception.status, 403, bad)
+            # it expires, and it dies with its invite
+            late = session["expires_unix"] + 1
+            self.assertIsNone(races.who_holds(session["token"], now=late))
+            fewer = serve.Races(SIX, MODELS, ledger, 0.2, {"owner"}, set(), runs_dir=Path(tmp) / "runs")
+            self.assertIsNone(fewer.who_holds(session["token"]))
+            # neither the invite nor the token is ever written to the ledger file
+            ledger.hold(0.2, serve.who_of("judge-1"))
+            written = (Path(tmp) / "l.json").read_text()
+            self.assertNotIn("judge-1", written)
+            self.assertNotIn(signature, written)
+
     def test_it_will_not_start_if_it_cannot_record_what_it_spends(self):
         with TemporaryDirectory() as tmp:
             blocker = Path(tmp) / "a-file"
@@ -131,9 +192,30 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(streamed, sum(len(r["turns"]) for c in body["contestants"].values() for r in c["results"]))
         # it was filed, counted against the code, and the server is free again
         self.assertTrue((Path(self.tmp.name) / "runs" / body["run_id"] / "record.json").exists())
-        self.assertEqual(self.races.ledger.state["by_code"], {"judge-1": 1})
+        self.assertEqual(self.races.ledger.state["by_code"], {serve.who_of("judge-1"): 1})
+        # its cost was charged to the provider of the two models, and nothing is still held
+        charged = self.races.ledger.state["providers"]["scripted"]
+        self.assertEqual((charged["spent_usd"], charged["held_usd"]), (body["budget"]["spent_usd"], 0.0))
         self.assertEqual(self.races.ledger.state["races"], 1)
         self.assertFalse(self.races.busy.locked())
+
+    def test_signing_in_over_http_then_racing_with_the_session_only(self):
+        def signin(ask):
+            request = urllib.request.Request(
+                f"{self.url}/signin", json.dumps(ask).encode(), {"Content-Type": "application/json"}
+            )
+            return urllib.request.urlopen(request, timeout=10)
+
+        with self.assertRaises(urllib.error.HTTPError) as refused:
+            signin({"invite": "not-an-invite"})
+        self.assertEqual(refused.exception.code, 403)
+        session = json.load(signin({"invite": "judge-1"}))
+        self.assertEqual(session["races_left"], 3)
+        task = next(iter(self.races.tasks))
+        with mock.patch("builtins.print"):
+            reply = self.post({"task": task, "a": MODELS[0], "b": MODELS[1], "token": session["token"]})
+            self.assertIn("event: record", reply.read().decode())
+        self.assertEqual(json.load(signin({"token": session["token"]}))["races_left"], 2)
 
     def test_one_race_at_a_time(self):
         task = next(iter(self.races.tasks))

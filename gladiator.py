@@ -30,10 +30,20 @@ from engine import suite as suites
 from reports import markdown
 from scorers import components
 
+# The environment variables that hold each provider's key (providers/*.py).
+PROVIDER_KEYS = {
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "openrouter": ("OPENROUTER_API_KEY",),
+}
+
 # The models a live race may use unless told otherwise: small and cheap, each with a listed or published price.
 DEFAULT_RACE_MODELS = [
     "anthropic:claude-haiku-5-5",
     "openai:gpt-6-luna",
+    "google:gemini-3.1-flash-lite",
+    "google:gemini-3.5-flash-lite",
     "openrouter:deepseek/deepseek-v4.1-flash-1017",
     "openrouter:minimax/minimax-m3.1-flash",
     "openrouter:qwen/qwen3.8-27b",
@@ -103,21 +113,52 @@ def cmd_match(args):
 
 
 def cmd_serve(args):
+    import providers
     from engine import serve
 
-    codes = {c.strip() for c in os.environ.get("GLADIATOR_RACE_CODES", "").split(",") if c.strip()} or None
-    models = args.model or DEFAULT_RACE_MODELS
+    # GLADIATOR_RACE_CODES: invites, comma-separated; "invite:40" gives that invite its own number of races.
+    codes, limits = set(), {}
+    for entry in os.environ.get("GLADIATOR_RACE_CODES", "").split(","):
+        code, _, limit = entry.strip().partition(":")
+        if code:
+            codes.add(code)
+            if limit:
+                limits[serve.who_of(code)] = int(limit)
+    codes = codes or None
+    budgets = {}
+    for entry in args.provider_usd or []:
+        name, _, amount = entry.partition("=")
+        if name not in providers.PROVIDERS or not amount:
+            sys.exit(f"--provider-usd takes provider=amount, e.g. openrouter=30 (got {entry!r})")
+        budgets[name] = float(amount)
+    # with budgets per provider and no total asked for, the budgets are the limits
+    total = args.total_usd if args.total_usd is not None else (None if budgets else 5.0)
+    wanted = args.model or DEFAULT_RACE_MODELS
+    # A model is offered only if this server holds its provider's key and, with budgets, the provider has one.
+    models, left_out = [], []
+    for model in wanted:
+        name = providers.parse(model)[0]
+        has_key = name == "scripted" or any(os.environ.get(k) for k in PROVIDER_KEYS.get(name, ()))
+        has_budget = not budgets or total is not None or name in budgets
+        (models if has_key and has_budget else left_out).append(model)
+    if len(models) < 2:
+        sys.exit("Fewer than two models have both a key and a budget on this machine: nothing to race.")
     state = Path(args.state)
-    ledger = serve.Ledger(state / "race_ledger.json", args.total_usd, args.runs_per_code)
+    ledger = serve.Ledger(state / "race_ledger.json", total, args.runs_per_code, budgets, limits)
     races = serve.Races(
         args.suite, models, ledger, args.max_usd, codes, set(args.origin or []), runs_dir=state / "runs"
     )
     server = serve.serve(races, args.host, args.port)
-    who = f"{len(codes)} access code(s)" if codes else "no access codes: this machine only"
+    who = f"{len(codes)} invite(s)" if codes else "no invites: this machine only"
+    limit = f"${total:.2f} in total" if total is not None else "the provider budgets"
+    per = "".join(
+        f"\n  budget {b['provider']}: ${b['left_usd']:.2f} left of ${b['limit_usd']:.2f}" for b in races.budgets()
+    )
+    out = f"\n  not offered (no key or no budget here): {', '.join(left_out)}" if left_out else ""
     print(
         f"Gladiator race runner on http://{args.host}:{server.server_address[1]}  ({who})\n"
         f"  tasks: {', '.join(races.tasks)}\n  models: {', '.join(models)}\n"
-        f"  cap ${args.max_usd:.2f} per race, ${ledger.left():.2f} left of ${args.total_usd:.2f} in total",
+        f"  cap ${args.max_usd:.2f} per race, ${ledger.left():.2f} left of {limit}{per}{out}",
         flush=True,
     )
     try:
@@ -316,9 +357,18 @@ def main(argv=None):
     )
     sv.add_argument("--max-usd", type=float, default=0.25, help="hard cap for one race in USD (half per model)")
     sv.add_argument(
-        "--total-usd", type=float, default=5.0, help="stop starting races once this much has been spent in total"
+        "--total-usd",
+        type=float,
+        help="stop starting races once this much has been spent in total (default 5, or none with --provider-usd)",
     )
-    sv.add_argument("--runs-per-code", type=int, default=10, help="live races one access code may start")
+    sv.add_argument(
+        "--provider-usd",
+        action="append",
+        metavar="PROVIDER=USD",
+        help="a budget for one provider's models, e.g. openrouter=30 (repeatable); a model is offered while its "
+        "provider can cover one more race",
+    )
+    sv.add_argument("--runs-per-code", type=int, default=10, help="live races one invite may start")
     sv.add_argument(
         "--origin", action="append", help="a web origin allowed to call this server from a browser (repeatable)"
     )
