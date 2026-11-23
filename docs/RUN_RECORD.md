@@ -35,6 +35,12 @@ in memory; the file and its seal never change.
 | `grade_details` | The grader's public details (mistake counts, confusions, per-item mistakes). |
 | `public_packet`, `turns` | Everything the model saw and did, per turn: tool, arguments, observation, usage, cost, timing. |
 
+**Cost of a call.** Each turn carries `cost_usd`, the cost of record, and `list_cost_usd`, tokens times the listed
+price. Where a provider reports what it billed (`usage.billed_usd`; OpenRouter does), that is the cost of record, because
+a router can bill the same model at different rates depending on the host that served the call. Otherwise the two are
+equal. Records written before 2026-11-23 have no `list_cost_usd` and no `billed_usd`: their `cost_usd` is the list-price
+estimate, which understated OpenRouter spend and overstated Claude Haiku 5.5 (cache reads were priced as plain input).
+
 ## Validation records
 `gladiator validate <namespace>/<name>@<version> --write` saves `validations/<namespace>/<name>@<version>.json`:
 the evidence behind a challenge version's trust (docs/PRODUCT.md section 6). Same seal as a run record

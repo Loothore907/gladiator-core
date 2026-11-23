@@ -72,6 +72,24 @@ def live_price(model: str) -> dict:
     return price
 
 
+def usage_from(u) -> Usage:
+    """Token counts and the charge for one call, from the response's usage block. OpenRouter reports what it
+    actually billed (`cost`, in USD) when asked to (`usage: {include: true}` in the request): that is the cost of
+    record, since the same model is billed at different rates depending on the host the call was routed to."""
+    if not u:
+        return Usage()
+    details = getattr(u, "prompt_tokens_details", None)
+    billed = getattr(u, "cost", None)
+    if billed is None:  # an SDK that does not know the field keeps it among the extras
+        billed = (getattr(u, "model_extra", None) or {}).get("cost")
+    return Usage(
+        input_tokens=u.prompt_tokens or 0,
+        cached_input_tokens=(getattr(details, "cached_tokens", 0) or 0) if details else 0,
+        output_tokens=u.completion_tokens or 0,
+        billed_usd=float(billed) if isinstance(billed, (int, float)) and not isinstance(billed, bool) else None,
+    )
+
+
 class OpenRouterProvider(Provider):
     name = "openrouter"
 
@@ -86,6 +104,8 @@ class OpenRouterProvider(Provider):
         extra = {
             # Only route to hosts that support every parameter we send (tools, tool_choice).
             "provider": {"require_parameters": True},
+            # Asks for the charge in the response. OpenRouter now always includes it and ignores this field
+            # (docs, 2026-11-23); it is kept so the request still says what the record relies on.
             "usage": {"include": True},
         }
         if settings.effort:
@@ -153,13 +173,7 @@ class OpenRouterChat(Chat):
             except json.JSONDecodeError:
                 parsed = None  # not JSON at all: passed on as-is and rejected downstream
             name, args, action = interpret_call(calls[0]["function"]["name"], parsed, raw)
-        u = resp.usage
-        details = getattr(u, "prompt_tokens_details", None) if u else None
-        usage = Usage(
-            input_tokens=(u.prompt_tokens or 0) if u else 0,
-            cached_input_tokens=(getattr(details, "cached_tokens", 0) or 0) if details else 0,
-            output_tokens=(u.completion_tokens or 0) if u else 0,
-        )
+        usage = usage_from(resp.usage)
         host = getattr(resp, "provider", None) or ""
         stop = (choice.finish_reason or "") + (f" via {host}" if host else "")
         return Reply(action, msg.get("content") or "", stop, usage, max(0, len(calls) - 1), resp.id or "", name, args)
