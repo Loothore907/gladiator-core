@@ -20,8 +20,8 @@ COPY . .
 RUN uv sync --frozen --no-dev \
     && chmod -R a+rX /app \
     && useradd --create-home gladiator && mkdir -p runs && chown gladiator runs
-USER gladiator
 
 ENV PATH="/app/.venv/bin:$PATH"
-ENTRYPOINT ["gladiator"]
+# Never runs the engine as root: the entrypoint only makes a mounted folder writable, then drops to `gladiator`.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["--help"]
