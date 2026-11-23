@@ -59,6 +59,18 @@ jobs:
         run: |
           docker run --rm gladiator:ci match --suite suites/ten_case.yaml --a scripted:golden --b scripted:invalid --max-usd 1 | tee match.txt
           grep -q "Cases passed | 10/10 | 0/10" match.txt
+      - name: The race runner can keep its ledger on a freshly mounted volume, and never runs as root
+        run: |
+          docker volume create race_state
+          docker run -d --name runner -e GLADIATOR_RACE_CODES=ci-invite -v race_state:/data -p 8080:8080 gladiator:ci \
+            serve --host 0.0.0.0 --port 8080 --state /data --model scripted:golden --model scripted:silent
+          for i in 1 2 3 4 5 6 7 8 9 10; do curl -sf localhost:8080/health && break || sleep 2; done
+          curl -sf localhost:8080/health | grep -q '"ok": true'
+          docker exec runner test -s /data/race_ledger.json
+          test "$(docker exec runner stat -c %U /data/race_ledger.json)" = "gladiator"
+          # the engine itself runs as the unprivileged user, whatever started the container
+          test "$(docker exec runner stat -c %U /proc/1)" = "gladiator"
+          docker rm -f runner
 
   publish:
     name: Publish the container image
