@@ -60,6 +60,54 @@ class SimulatorTests(unittest.TestCase):
                 v1_case.kernel("transaction_state_v01")
 
 
+class BilledCostTests(unittest.TestCase):
+    """The cost of record is what the provider billed, when it says; the list-price sum is only an estimate."""
+
+    PRICE = {"input": 0.15, "cached_input": 0.003, "output": 0.6}
+
+    def test_a_billed_cost_wins_over_the_estimate_and_both_are_kept(self):
+        from engine.budget import call_cost
+        from providers.base import Usage
+
+        estimate = (50_000 * 0.15 + 950_000 * 0.003 + 10_000 * 0.6) / 1_000_000
+        quiet_provider = Usage(input_tokens=1_000_000, cached_input_tokens=950_000, output_tokens=10_000)
+        self.assertEqual(call_cost(self.PRICE, quiet_provider), (estimate, estimate))
+        # the host did not give the cache discount the price list promises: the bill is the truth
+        billed = Usage(input_tokens=1_000_000, cached_input_tokens=950_000, output_tokens=10_000, billed_usd=0.156)
+        self.assertEqual(call_cost(self.PRICE, billed), (0.156, estimate))
+        self.assertEqual(call_cost(self.PRICE, Usage(billed_usd=0.0)), (0.0, 0.0))  # a free call is still a bill
+
+    def test_openrouter_usage_carries_the_charge_it_reports(self):
+        from types import SimpleNamespace as NS
+
+        from providers.openrouter_api import usage_from
+
+        details = NS(cached_tokens=900)
+        known = usage_from(NS(prompt_tokens=1000, completion_tokens=50, prompt_tokens_details=details, cost=0.00042))
+        self.assertEqual((known.input_tokens, known.cached_input_tokens, known.output_tokens), (1000, 900, 50))
+        self.assertEqual(known.billed_usd, 0.00042)
+        # an SDK that does not know the field keeps it among the extras
+        extra = usage_from(
+            NS(prompt_tokens=10, completion_tokens=1, prompt_tokens_details=None, model_extra={"cost": 0.5})
+        )
+        self.assertEqual(extra.billed_usd, 0.5)
+        # no charge reported: the estimate will stand, and nothing is invented
+        silent = usage_from(NS(prompt_tokens=10, completion_tokens=1, prompt_tokens_details=None))
+        self.assertIsNone(silent.billed_usd)
+        self.assertIsNone(
+            usage_from(NS(prompt_tokens=1, completion_tokens=1, prompt_tokens_details=None, cost="n/a")).billed_usd
+        )
+        self.assertEqual(usage_from(None).input_tokens, 0)
+
+    def test_a_match_record_keeps_both_figures_for_every_call(self):
+        body, _ = quiet(runner.run_match, suites.load(SIX), "scripted:golden", "scripted:invalid", 1.0)
+        turns = [t for c in body["contestants"].values() for r in c["results"] for t in r["turns"]]
+        self.assertTrue(turns)
+        for t in turns:
+            self.assertEqual(t["cost_usd"], t["list_cost_usd"])  # the scripted players report no bill
+            self.assertIsNone(t["usage"]["billed_usd"])
+
+
 class MatchTests(unittest.TestCase):
     def test_golden_beats_invalid(self):
         body, operator = quiet(runner.run_match, suites.load(TEN), "scripted:golden", "scripted:invalid", 1.0)

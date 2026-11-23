@@ -84,6 +84,16 @@ def cost_usd(
     ) / 1_000_000
 
 
+def call_cost(price: dict, usage) -> tuple[float, float]:
+    """(cost of record, list-price estimate) for one call. The cost of record is what the provider says it
+    billed, when it says; otherwise the estimate. Both are kept, so a record shows any gap between them."""
+    estimate = cost_usd(
+        price, usage.input_tokens, usage.cached_input_tokens, usage.output_tokens, usage.cache_write_tokens
+    )
+    billed = getattr(usage, "billed_usd", None)
+    return (estimate if billed is None else float(billed)), estimate
+
+
 def next_input_tokens(input_chars: int, last_usage=None, new_chars: int = 0) -> int:
     """Estimate the next call's input tokens.
 

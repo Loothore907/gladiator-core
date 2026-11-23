@@ -25,7 +25,7 @@ from pathlib import Path
 
 import modules
 import providers
-from engine.budget import Budget, BudgetExhausted, cost_usd, next_input_tokens, price_for
+from engine.budget import Budget, BudgetExhausted, call_cost, next_input_tokens, price_for
 from engine.suite import node as get_node
 from providers.base import FatalProviderError, ProviderError, Settings
 
@@ -164,7 +164,7 @@ def run_node(
             break
         call_s = time.monotonic() - t0
         u = last_usage = reply.usage
-        cost = cost_usd(price, u.input_tokens, u.cached_input_tokens, u.output_tokens, u.cache_write_tokens)
+        cost, list_cost = call_cost(price, u)
         budget.settle(held, cost)
         spent_usd += cost
         spent_tokens += u.input_tokens + u.output_tokens
@@ -177,7 +177,8 @@ def run_node(
             "stop_reason": reply.stop_reason,
             "extra_tool_calls": reply.extra_tool_calls,
             "usage": asdict(u),
-            "cost_usd": cost,
+            "cost_usd": cost,  # what the provider billed, when it says; otherwise the list-price estimate
+            "list_cost_usd": list_cost,  # tokens times the listed price, kept so any gap can be seen
             "call_s": round(call_s, 3),
             "response_id": reply.response_id,
         }

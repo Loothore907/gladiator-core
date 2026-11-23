@@ -83,6 +83,10 @@ class Usage:
     cached_input_tokens: int = 0  # the subset of input served from cache
     cache_write_tokens: int = 0  # the subset of input written to the cache (Anthropic bills these above input)
     output_tokens: int = 0  # visible output + reasoning/thinking tokens
+    # What the provider says it charged for this call, in USD, when it says. This is the cost of record: a price
+    # list times a token count is only an estimate (a router can bill the same model at different rates
+    # depending on which host served the call). None means the provider did not say, and the estimate stands.
+    billed_usd: float | None = None
 
 
 @dataclass
