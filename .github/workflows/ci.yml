@@ -59,3 +59,35 @@ jobs:
         run: |
           docker run --rm gladiator:ci match --suite suites/ten_case.yaml --a scripted:golden --b scripted:invalid --max-usd 1 | tee match.txt
           grep -q "Cases passed | 10/10 | 0/10" match.txt
+
+  publish:
+    name: Publish the container image
+    # Only what main's checks passed is published: the hosting rule in docs/DEPLOYMENT.md.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, test, container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/loothore907/gladiator-core
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image, labelled with the commit it came from
+        run: |
+          docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:main" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.licenses=Apache-2.0" .
+      - name: The image about to be published plays a match
+        run: |
+          docker run --rm "$IMAGE:$GITHUB_SHA" match --suite suites/ten_case.yaml --a scripted:golden --b scripted:invalid --max-usd 1 | tee match.txt
+          grep -q "Cases passed | 10/10 | 0/10" match.txt
+      - name: Push to GitHub's container registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:main"

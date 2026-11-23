@@ -57,8 +57,9 @@ uv run python gladiator.py serve                      # this machine only, your 
 ## When we pick a host: the switch-on checklist
 
 - [ ] Choose the target (a GitHub Actions scheduled job, a container service, or the customer's cluster).
-- [ ] Add an image-publish step to CI (push to GitHub's container registry, tagged with the commit and
-      `latest` on `main`).
+- [x] Image published by CI: every push to `main` that passes its checks is pushed to
+      `ghcr.io/loothore907/gladiator-core`, tagged with its full commit id and `main` (the `publish` job).
+      Deploy by commit id, never by `main`.
 - [ ] Put the keys in the host's secret store; set provider-side spend limits.
 - [ ] Decide where `runs/` lives (bucket or volume) and who can read `operator.json` (it contains the
       private answer-side data).
