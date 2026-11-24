@@ -76,38 +76,68 @@ def choices(bp: dict) -> list[dict]:
     return [{"name": name, **{k: v[k] for k in keep if k in v}} for name, v in bp["variables"].items()]
 
 
+def _whole_number(raw, unit: str = ""):
+    """A whole number from what a person or a model gave: 30, "30", "10,000", "$250" or "30 days" (the choice's
+    own unit). Anything else is None."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        return int(raw) if raw.is_integer() else None
+    m = re.fullmatch(r"\$?\s*(-?\d[\d,]*)\s*([a-z ]*)", str(raw).strip().lower())
+    if not m:
+        return None
+    said, units = m.group(2).strip(), {unit.lower(), unit.lower().rstrip("s")} if unit else set()
+    if said and said not in units:
+        return None
+    return int(m.group(1).replace(",", ""))
+
+
+def check_one(bp: dict, name: str, raw) -> tuple[object, str | None]:
+    """One value for one choice: (the value as the test will use it, None), or (None, why not) as a sentence a
+    person can act on. Nothing outside the declared choices is accepted."""
+    var = bp["variables"].get(name)
+    if var is None:
+        return None, f"'{name}' is not one of this test's choices ({', '.join(bp['variables'])})."
+    if var["type"] == "whole_number":
+        value = _whole_number(raw, var.get("unit", ""))
+        if value is None:
+            return None, f"{name}: '{raw}' is not a whole number."
+        low, high = var.get("min"), var.get("max")
+        if (low is not None and value < low) or (high is not None and value > high):
+            return None, f"{name}: {value} is outside the allowed range, {low} to {high}."
+        return value, None
+    value = str(raw).strip().lower()
+    if value in RESERVED_WORDS:
+        return None, f"{name}: '{raw}' cannot be used as a name here. Pick another word."
+    if not WORD.match(value):
+        return None, f"{name}: '{raw}' must be one plain word (2 to 20 lowercase letters or _)."
+    return value, None
+
+
+def broken_rules(bp: dict, values: dict) -> list[dict]:
+    """The rules between choices that these values break: the sentence to show, and the choices it is about."""
+    out = []
+    for rule in bp.get("require") or []:
+        if not evaluate(rule["rule"], values):
+            about = [n for n in bp["variables"] if re.search(rf"\b{re.escape(n)}\b", rule["rule"])]
+            out.append({"say": rule["say"], "choices": about})
+    return out
+
+
 def check_values(bp: dict, given: dict | None = None) -> tuple[dict, list[str]]:
     """The full set of values for a fork (defaults, overruled by `given`) and every problem with them, each as a
     sentence a person can act on. Nothing outside the declared choices is accepted."""
     values, problems = defaults(bp), []
     for name, raw in (given or {}).items():
-        var = bp["variables"].get(name)
-        if var is None:
-            problems.append(f"'{name}' is not one of this test's choices ({', '.join(bp['variables'])}).")
-            continue
-        if var["type"] == "whole_number":
-            try:
-                value = int(str(raw).strip())
-            except ValueError:
-                problems.append(f"{name}: '{raw}' is not a whole number.")
-                continue
-            low, high = var.get("min"), var.get("max")
-            if (low is not None and value < low) or (high is not None and value > high):
-                problems.append(f"{name}: {value} is outside the allowed range, {low} to {high}.")
-                continue
+        value, problem = check_one(bp, name, raw)
+        if problem:
+            problems.append(problem)
         else:
-            value = str(raw).strip().lower()
-            if value in RESERVED_WORDS:
-                problems.append(f"{name}: '{raw}' cannot be used as a name here. Pick another word.")
-                continue
-            if not WORD.match(value):
-                problems.append(f"{name}: '{raw}' must be one plain word (2 to 20 lowercase letters or _).")
-                continue
-        values[name] = value
+            values[name] = value
     if not problems:
-        for rule in bp.get("require") or []:
-            if not evaluate(rule["rule"], values):
-                problems.append(rule["say"])
+        problems += [rule["say"] for rule in broken_rules(bp, values)]
     return values, problems
 
 
