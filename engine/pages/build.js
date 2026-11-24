@@ -337,7 +337,13 @@
       );
     }
     if ((test.unusable || []).length) {
-      note.append(el('p', { text: 'These values from your description are not allowed, so the library test\'s values are shown instead:' }), list(test.unusable));
+      // "refund_cap: 9 is outside ..." reads better with the question in place of the choice's name
+      const plain = test.unusable.map((line) => {
+        const cut = line.indexOf(': ');
+        const q = test.questions.find((x) => x.name === line.slice(0, cut));
+        return q ? `${q.ask} ${line.slice(cut + 2)}` : line;
+      });
+      note.append(el('p', { text: 'These values from your description are not allowed, so the library test\'s values are shown instead:' }), list(plain));
     }
   }
   function light(name, on) {

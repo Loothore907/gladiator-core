@@ -106,7 +106,8 @@ class DescribeTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             found = make(tmp).describe({"description": "review access requests for employees"})
             self.assertEqual(found["proposed"], REFUNDS)  # the only match with open choices, on one shared word
-            self.assertEqual(found["closer"][0]["ref"].split("@")[0], "gladiator/access-review")
+            # only tests that rank above every adaptable one are named: one shared word is not "closer"
+            self.assertEqual([c["ref"].split("@")[0] for c in found["closer"]], ["gladiator/access-review"])
 
     def test_an_empty_or_endless_description_is_refused(self):
         with TemporaryDirectory() as tmp:

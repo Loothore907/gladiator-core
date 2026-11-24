@@ -672,14 +672,13 @@ class Forks:
         finally:
             if reader:
                 self.ledger.settle_small(self.read_usd, reader.spent_usd, provider)
-        # Tests that match the description's words better than the one proposed but declare no open choices: the
-        # page says so, and does not pass the proposed test off as the closest one.
+        # Tests that match the description's words better than any test with open choices, but declare none
+        # themselves: the page names them, and does not pass an adaptable test off as the closest one.
         closer = []
         for m in found["matches"]:
-            if m["ref"] == found["proposed"]:
+            if m["choices"]:
                 break
-            if not m["choices"]:
-                closer.append({"ref": m["ref"], "name": m["name"], "matched": m["matched"]})
+            closer.append({"ref": m["ref"], "name": m["name"], "matched": m["matched"]})
         out = {
             "matches": [
                 {"ref": m["ref"], "name": m["name"], "about": first_sentence(m["description"]), "matched": m["matched"]}
