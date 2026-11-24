@@ -43,6 +43,8 @@ uv run python gladiator.py serve                      # this machine only, your 
   refuses to listen beyond this machine. An invite is exchanged once for a session (`POST /signin`) that lasts
   30 days; a browser then needs only the session. Sessions are signed with a key made from the invites, so
   changing the invites signs everyone out. The ledger file records a sign-in by an id, never the invite.
+- `GET /races` lists the live races it has run (record id and seal, task, the two models, who won, who passed,
+  what each cost), read back from the sealed records on disk, so a restart forgets none. Public facts only.
 - A browser page on another address must be named with `--origin`.
 
 ## Rules for any hosted environment

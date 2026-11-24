@@ -1,10 +1,12 @@
 """A race runner: start one match over HTTP and watch it happen.
 
-`gladiator serve` answers four requests:
+`gladiator serve` answers five requests:
 
   GET  /options   what a race can be made of: the tasks, the models whose provider can still pay for a race,
                   each provider's budget and what is left of it, difficulty levels and scoring profiles
   GET  /health    whether a race is running, and how much of each spending limit is left
+  GET  /races     the live races this server has run, newest last: for each its sealed record's id and seal,
+                  the task, the two models, who won, who passed and what each cost. Public facts only
   POST /signin    {"invite"} (or {"token"} to renew): a session token and the races it has left. An invite is
                   typed or followed once; after that the session is all a browser needs
   POST /race      {"task", "a", "b", "difficulty", "profile", "token"}: plays one fresh scenario of that task between
@@ -47,6 +49,27 @@ SESSION_DAYS = 30  # how long a sign-in lasts
 def who_of(code: str) -> str:
     """The id a sign-in is recorded under: never the code itself (the ledger is a file on a disk)."""
     return hashlib.sha256(("gladiator-invite\n" + code).encode()).hexdigest()[:16]
+
+
+def summary(sealed: dict) -> dict:
+    """The public facts of one live race, from its sealed record: what a viewer may know, nothing private."""
+    body = sealed["body"]
+    sides = {side: body["contestants"][side] for side in ("A", "B")}
+    first = {side: (c["results"] or [{}])[0] for side, c in sides.items()}
+    winner = (body.get("verdict") or {}).get("winner")
+    return {
+        "run_id": body["run_id"],
+        "seal": sealed["sha256"],
+        "task": (body["suite"].get("order") or [None])[0],
+        "a": sides["A"]["id"],
+        "b": sides["B"]["id"],
+        "winner": sides[winner]["id"] if winner in sides else None,
+        "a_passed": bool(first["A"].get("passed")),
+        "b_passed": bool(first["B"].get("passed")),
+        "a_cost_usd": float(first["A"].get("cost_usd") or 0),
+        "b_cost_usd": float(first["B"].get("cost_usd") or 0),
+        "difficulty": (body.get("settings") or {}).get("defaults", {}).get("difficulty"),
+    }
 
 
 LIVE_LEVELS = ("easy", "standard")  # harder levels take too long and cost too much to watch live
@@ -190,6 +213,14 @@ class Races:
         self.ledger, self.max_usd = ledger, max_usd
         self.codes, self.origins, self.runs_dir = codes, origins or set(), runs_dir
         self.busy = threading.Lock()
+        # The live races already on file, read back from their sealed records: the folder is the truth, so a
+        # restart forgets nothing and nothing can be listed that was not really run.
+        self.results: list[dict] = []
+        for path in sorted(Path(runs_dir).glob("*/record.json")) if runs_dir else []:
+            try:
+                self.results.append(summary(json.loads(path.read_text(encoding="utf-8"))))
+            except (ValueError, KeyError, TypeError):
+                continue  # not a race record: leave it out, never guess
         # Sessions are signed with a key made from the invites themselves: nothing more to store or to leak,
         # and changing the invites signs everyone out.
         self.session_key = hashlib.sha256(("gladiator-session\n" + "\n".join(sorted(codes or []))).encode()).digest()
@@ -261,6 +292,9 @@ class Races:
             "cap_usd_per_race": self.max_usd,
             "needs_code": self.codes is not None,
         }
+
+    def races_run(self) -> dict:
+        return {"races": list(self.results)}
 
     def health(self) -> dict:
         return {
@@ -351,6 +385,7 @@ class Races:
                 (folder / "operator.json").write_text(
                     json.dumps(operator, indent=1, ensure_ascii=False, default=str), encoding="utf-8"
                 )
+            self.results.append(summary(sealed))
             return sealed, operator
         finally:
             self.ledger.settle(self.max_usd, spent, tuple(sides.values()), spent_by)
@@ -394,6 +429,8 @@ def handler_for(races: Races):
                 self._json(200, races.options())
             elif path == "/health":
                 self._json(200, races.health())
+            elif path == "/races":
+                self._json(200, races.races_run())
             else:
                 self._json(404, {"error": "Not found."})
 

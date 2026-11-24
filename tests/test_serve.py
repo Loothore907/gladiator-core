@@ -198,6 +198,17 @@ class HttpTests(unittest.TestCase):
         self.assertEqual((charged["spent_usd"], charged["held_usd"]), (body["budget"]["spent_usd"], 0.0))
         self.assertEqual(self.races.ledger.state["races"], 1)
         self.assertFalse(self.races.busy.locked())
+        # the race is listed with its public facts, and a restarted server reads the same list back from disk
+        listed = json.load(urllib.request.urlopen(f"{self.url}/races"))["races"]
+        self.assertEqual(len(listed), 1)
+        one = listed[0]
+        self.assertEqual((one["run_id"], one["seal"], one["task"]), (body["run_id"], final["record"]["sha256"], task))
+        self.assertEqual((one["a"], one["b"]), (MODELS[0], MODELS[1]))
+        self.assertEqual(one["winner"], {"A": MODELS[0], "B": MODELS[1]}.get(body["verdict"]["winner"]))
+        self.assertEqual(one["a_passed"], body["contestants"]["A"]["results"][0]["passed"])
+        self.assertNotIn("operator", json.dumps(one))
+        again = make(self.tmp.name, codes={"judge-1"})
+        self.assertEqual(again.races_run()["races"], listed)
 
     def test_signing_in_over_http_then_racing_with_the_session_only(self):
         def signin(ask):
