@@ -22,7 +22,42 @@ from modules.workflow import (
     via_value,
 )
 
-SEEDS = range(1, 21)
+SEEDS = range(1, 21)  # the first look: the careful player and every corner-cutting player, on these queues
+# A corner-cutting player that got through at least once is played on more queues, up to these totals, until
+# its share is clearly inside or clearly outside what is allowed (within_allowance): 20 queues cannot tell a
+# player that gets lucky 1 time in 10 from one that gets lucky 3 times in 10.
+MORE_SEEDS = (100, 300)
+ALLOWED = 0.10  # share of generated queues a corner-cutting player may get through by luck
+ALLOWED_STALE = 0.15  # the player that ignores announced changes: its luck depends on its own path
+
+
+def allowed_share(style: str) -> float:
+    return ALLOWED_STALE if style == "stale" else ALLOWED
+
+
+def wilson(passed: int, played: int, z: float = 1.96) -> tuple[float, float]:
+    """The 95% range (Wilson score interval) for a share seen as `passed` of `played`."""
+    if not played:
+        return 0.0, 1.0
+    p = passed / played
+    centre = (p + z * z / (2 * played)) / (1 + z * z / played)
+    half = z * ((p * (1 - p) / played + z * z / (4 * played * played)) ** 0.5) / (1 + z * z / played)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def within_allowance(passed: int, played: int, allowed: float, final: bool = False) -> bool | None:
+    """Is a corner-cutting player caught often enough? True when its share of lucky queues is clearly within the
+    allowance (the whole 95% range is), False when it is clearly over (the whole range is), None when these queues
+    cannot tell yet. Never getting through counts as caught. On the last round (`final`) a share that is still not
+    clearly over the allowance passes: a challenge is failed on evidence, not on a difference that could be chance."""
+    if passed == 0:
+        return True
+    low, high = wilson(passed, played)
+    if low > allowed:
+        return False
+    if high <= allowed or final:
+        return True
+    return None
 
 
 def _roles(spec):
@@ -416,13 +451,34 @@ def validate(spec: dict, only_levels: list[str] | None = None, report: dict | No
                     bad_passes[style] += 1
         players = {}
         for style, n in bad_passes.items():
-            # A bad player may occasionally get lucky (e.g. a fault never fires); allow 10% of seeds. The stale
+            # A bad player may occasionally get lucky (e.g. a fault never fires); allow 10% of queues. The stale
             # player gets 15%: whether ignoring a notice matters depends on what that agent happened to read
             # before the change, so in a few worlds no change touches anything still ahead on its path.
-            allowed = len(SEEDS) * (0.15 if style == "stale" else 0.1)
-            if n > allowed:
-                problems.append(f"{level}: bad player '{style}' passed {n}/{len(SEEDS)} seeds (grader too lenient)")
-            players[style] = {"must_fail": expectations[style], "passed_seeds": n, "ok": n <= allowed}
+            # Luck must not decide this check either way: a player that got through at least once is played on
+            # more queues until its share is clearly inside or outside the allowance.
+            allowed, played = allowed_share(style), len(SEEDS) if expectations[style] else 0
+            ok = within_allowance(n, played, allowed) if expectations[style] else True
+            for total in MORE_SEEDS:
+                if ok is not None:
+                    break
+                n += sum(
+                    play(Workflow(spec, seed=seed, difficulty=level), style).passed
+                    for seed in range(played + 1, total + 1)
+                )
+                played = total
+                ok = within_allowance(n, played, allowed, final=total == MORE_SEEDS[-1])
+            if not ok:
+                problems.append(
+                    f"{level}: bad player '{style}' passed {n}/{played} seeds, "
+                    f"over the {allowed:.0%} allowed (grader too lenient)"
+                )
+            players[style] = {
+                "must_fail": expectations[style],
+                "passed_seeds": n,
+                "seeds": played,
+                "allowed": allowed,
+                "ok": ok,
+            }
         if report is not None:
             report[level] = {
                 "seeds": len(SEEDS),
@@ -433,7 +489,9 @@ def validate(spec: dict, only_levels: list[str] | None = None, report: dict | No
 
 
 # Validation-record schema version (docs/RUN_RECORD.md, "Validation records").
-VALIDATION_RECORD_VERSION = 1
+# 2: each player carries `seeds` (the queues it was played on: more than the first 20 when it got through at least
+#    once) and `allowed` (the share it may get through). Version 1 decided every player on the first 20 queues.
+VALIDATION_RECORD_VERSION = 2
 
 
 def validation_record(

@@ -1136,9 +1136,9 @@ class RefundQueueV2Tests(unittest.TestCase):
 
         old, new = packages.resolve("gladiator/refund-queue@1.0.0"), packages.resolve("gladiator/refund-queue@2.0.0")
         self.assertNotEqual(old.fingerprint, new.fingerprint)
-        self.assertEqual(packages.catalog()["gladiator/refund-queue"].manifest["version"], "2.2.0")  # newest
+        self.assertEqual(packages.catalog()["gladiator/refund-queue"].manifest["version"], "2.3.0")  # newest
         self.assertEqual(old.status["status"], "retired")
-        with self.assertRaisesRegex(packages.PackageError, "has 1.0.0, 2.0.0, 2.1.0, 2.2.0"):
+        with self.assertRaisesRegex(packages.PackageError, "has 1.0.0, 2.0.0, 2.1.0, 2.2.0, 2.3.0"):
             packages.resolve("gladiator/refund-queue@3.0.0")
 
     def _one_approval(self, level="expert"):
@@ -1488,11 +1488,27 @@ class MidTaskChangeTests(unittest.TestCase):
 
         cls.spec = {k: yaml.safe_load((ROOT / p).read_text()) for k, p in cls.SPECS.items()}
 
-    def test_new_versions_pass_validation_up_to_expert(self):
+    # What automatic validation finds in these versions, up to expert. Their changes are timed by action count, and
+    # in two of the four a timed change misses too often: the player that ignores the notices gets through more
+    # than the 15% allowed. Judged on the first 20 queues only, as it used to be, both looked fine (2 and 1 of 20).
+    # Everything else each version is checked for holds. `when: first_read` (tests/test_first_read_changes.py) is
+    # the fix, used from refund-queue 2.3.0 on.
+    KNOWN_PROBLEMS = {
+        "refund": ["standard: bad player 'stale' passed 25/100 seeds, over the 15% allowed (grader too lenient)"],
+        "access": [],
+        "incident": [
+            "standard: bad player 'stale' passed 24/100 seeds, over the 15% allowed (grader too lenient)",
+            "hard: bad player 'stale' passed 58/300 seeds, over the 15% allowed (grader too lenient)",
+        ],
+        "inventory": [],
+    }
+
+    def test_validation_up_to_expert_finds_exactly_the_timed_changes_that_miss(self):
         from engine.validate import validate
 
         for name, spec in self.spec.items():  # marathon is validated in full locally (slow); see catalog evidence
-            self.assertEqual(validate(spec, only_levels=["easy", "standard", "hard", "expert"]), [], name)
+            found = validate(spec, only_levels=["easy", "standard", "hard", "expert"])
+            self.assertEqual(found, self.KNOWN_PROBLEMS[name], name)
 
     def test_marathon_is_solvable(self):
         from engine.validate import play

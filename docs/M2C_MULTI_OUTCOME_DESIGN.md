@@ -111,6 +111,19 @@ The validator's careful player re-reads after a notice (and re-decides if one ar
 bad player keeps old records and must fail (up to 15% of seeds tolerated, since whether a stale read matters
 depends on that agent's own path). Every per-level setting must name every level (no silent fallback).
 
+**`when: first_read` (2026-11-24): a change that cannot miss.** A change timed by action count can arrive before
+the agent has read the record (it then just reads the new value) or after everything that depends on it is
+decided; either way ignoring the notice costs nothing. Measured over 200 generated queues, that happened in about
+3 of 10 standard worlds of refund-queue 2.2.0. A change with `when: first_read` (and `referenced_by`) is instead
+announced in the result of the agent's own first lookup of the record, which still shows the old values, and the
+record is always one whose change overturns at least one item that depends on it (tried on a copy of the world).
+Whichever of those items the agent handles first, a decision is still ahead that is wrong unless the notice is
+acted on. `at_action` then only switches the change on per level (0 = off) and says roughly where in the queue it
+should fall. A change with no such record in a world is not made there, and every world has at least one. Planned
+faults go among the calls no change can remove, so they are certain to fire. Records that planted-instruction
+items depend on are still left alone. Not yet combinable with timed changes or with coupled resources. Existing
+versions keep their timed changes exactly as they were; refund-queue 2.3.0 is the first to use this.
+
 ## 5. The two challenges on top
 
 | Challenge | Outcomes / coupling | Hazards |

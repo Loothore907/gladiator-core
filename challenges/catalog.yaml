@@ -718,6 +718,24 @@ challenges:
       - "gladiator validate gladiator/inventory-transfer@1.0.1 (runs in CI via tests)"
       - https://github.com/Loothore907/gladiator/actions/runs/44877738018  # (1.0.0) sol max 2/2, astra max 2/2
       - https://github.com/Loothore907/gladiator/actions/runs/44877739880  # (1.0.0) sol max 2/2, astra low 0/2
+  gladiator/refund-queue@2.3.0:
+    status: community
+    since: 2026-11-24
+    notes: >-
+      refund-queue 2.2.0 with its announced mid-task changes made to always matter (`when: first_read`,
+      docs/M2C_MULTI_OUTCOME_DESIGN.md section 4): each is announced in the result of the agent's first lookup of
+      the customer and overturns a request that is still undecided, and tool timeouts are scheduled among the calls
+      no change can remove. Rules, wording, records, tools and the other hazards are those of 2.2.0. Why: measured
+      over 200 generated queues on 2026-11-24, a player that ignores the notices got through 2.2.0 in 29.5% of
+      standard queues, 12% of hard and 4% of expert (15% allowed), because a change planned for a fixed action
+      count often arrived before the record was read or after everything that depended on it was decided; the
+      20-queue validation of 2.2.0 happened to see 2, 3 and 0. In 2.3.0 that player got through 0 of 100 queues at
+      standard, hard and expert, and a careful player passed all of them. No model has played 2.3.0 yet: the
+      calibration evidence of earlier versions is about a weaker form of this hazard and does not carry over.
+      2.2.0 stays as it is, with its results.
+    evidence:
+      - "gladiator validate gladiator/refund-queue@2.3.0 --write (all levels, 2026-11-24): validations/gladiator/refund-queue@2.3.0.json"
+      - "100 generated queues each at standard, hard and expert (2026-11-24, run locally): careful player 100/100; got through: change-ignoring 0, blind retry 0, planted instruction 0, stops early 0, rule without exceptions 2/0/0"
   gladiator/refund-queue@2.2.0:
     status: community
     since: 2026-11-21
@@ -726,6 +744,10 @@ challenges:
       (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
       rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
       calibration evidence of 2.1.0 carries over.
+      RE-VALIDATED 2026-11-24 under the sounder sampling (docs/RUN_RECORD.md, "Validation records"): not valid at
+      the standard level, where a player that ignores the announced changes gets through 25 of 100 generated
+      queues (15% allowed; the first 20 showed 2). Every other check passes at every level. The cause is changes
+      timed by action count, fixed in 2.3.0. The status above predates this finding and has not been changed.
     evidence:
       - "gladiator validate gladiator/refund-queue@2.2.0 (all levels, run locally on 2026-11-21)"
       - "calibration of gladiator/refund-queue@2.1.0 (see that entry)"
@@ -779,6 +801,12 @@ challenges:
       (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
       rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
       calibration evidence of 1.1.0 carries over.
+      RE-VALIDATED 2026-11-24 under the sounder sampling (docs/RUN_RECORD.md, "Validation records"): not valid at
+      the standard level (a player that ignores the announced changes gets through 24 of 100 generated queues)
+      and the hard level (58 of 300), against 15% allowed; the first 20 queues showed 1 at each. Every other check
+      passes at every level. The cause is changes timed by action count (see refund-queue 2.3.0 for the fix);
+      no fixed version of this challenge exists yet. The status above predates this finding and has not been
+      changed.
     evidence:
       - "gladiator validate gladiator/incident-triage@1.2.0 (all levels, run locally on 2026-11-21)"
       - "calibration of gladiator/incident-triage@1.1.0 (see that entry)"

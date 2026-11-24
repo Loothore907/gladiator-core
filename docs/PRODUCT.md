@@ -126,6 +126,44 @@ Rules:
 - **Public vs private parts.** What the model sees (the public packet) is kept separate from answer keys and
   hidden state (operator data). Validation checks that nothing private leaks into the public part.
 
+## 4a. A test for your own flow: describe, match, choose, fork
+
+How someone gets a test for *their* workflow without writing one (owner decisions, 2026-11-24). It extends the
+loop Gladiator Ledger already walks (describe your flow, find the closest tested workflow, pick two models, read
+the verdict, take the spec):
+
+1. **Describe.** The person says what their flow is, in their own words.
+2. **Match.** The closest tests in the library are found from the tests' own words (name, brief, rules). What
+   matched is shown, and when nothing matches that is said. A match is never invented.
+3. **Exact fit: use the test as it is.** Its results already exist.
+4. **Close fit: fork it by its choices.** A test can declare its **open choices** (a *blueprint*): named values
+   such as a time limit, an amount cap or what a customer tier is called, each with a question in plain words, a
+   default and limits. The person is asked only for the choices their description did not already settle.
+5. **Validate and seal.** The fork is produced from the blueprint and the chosen values, validated automatically
+   (section 6) and sealed as a new versioned package, with `forked_from` and the chosen values recorded. Nothing
+   is written unless validation passes. Like any new package it starts as `unreviewed`, with its validation
+   record as evidence.
+6. **Rejoin the loop.** Two models race on it, and the verdict and the spec follow as for any test.
+
+Rules:
+- **Users change values; structure is ours.** A fork by choices cannot add or remove a record type, a tool, a
+  decision or an obstacle: those are the blueprint's structure and stay exactly as tested. A flow that needs a
+  different structure needs a new blueprint, which is authored and reviewed like any test (section 6). The
+  library grows by platform-authored blueprints for common flows.
+- **One value, written once.** A chosen value lands everywhere it matters: the rule that grades, the wording the
+  model reads, every rewording of it and the near-miss records. The wording and the grading rule cannot drift
+  apart on a chosen value.
+- **A blueprint is not sealed content.** It sits beside the library, like trust status and validation records.
+  With its defaults it must reproduce the sealed test it names exactly, and that is checked, so the choices
+  provably describe that test and nothing else.
+- **The conversation is bound to the choices.** A model may run the conversation (read the description, propose
+  the match, suggest values, ask for what is missing), but it works through the same three operations as
+  everyone else: find, list the choices, fork with values. The engine refuses anything outside the declared
+  choices and does the validating and sealing itself, so nothing said in a conversation can change a test's
+  structure or skip a check.
+- **Private by default.** A person's own forks stay theirs unless they choose to share them. Sharing is
+  encouraged, never required. Platform-authored blueprints are public.
+
 ## 5. Fixed cases and generators
 
 Official challenges may be either kind:
@@ -184,6 +222,10 @@ fingerprint stay the same.
 2. A **reference solution passes**, so the challenge is solvable as stated.
 3. Known-bad behaviour **fails** (e.g. invalid actions, skipping a required step), so the grader actually
    grades.
+   A corner-cutting player can get lucky in a generated world, so how often it gets through is measured on
+   enough worlds that luck cannot pass or fail a challenge (20 first; a player that got through at least once
+   is played on 100, then 300 if that still cannot tell). The allowance is 10% (15% for the player that ignores
+   announced changes), and a challenge fails when its share is clearly over it. Details: `docs/RUN_RECORD.md`, "Validation records".
 4. **No leaks**: nothing from operator data appears in the public packet.
 5. Generators: a sample of instances is valid and solvable.
 
@@ -273,6 +315,7 @@ Public tests end up in training data eventually; for an open library that is una
 | **M2c** (design: `docs/M2C_WORKFLOW_DESIGN.md`; in progress: `workflow@1`, `refund-queue` 2.0.0 and `access-review` 1.0.0 built with `expert` levels. Calibration 2026-11-21: strong models make every per-item decision correctly even with exceptions; only recovery after faults separates them, and access-review saturates at the top. Multi-outcome decisions built with `incident-triage` 1.0.0 and coupled resources with `inventory-transfer` 1.0.0, completing the four M2c themes; then announced mid-task changes and a `marathon` level in new versions of all four (refund-queue 2.1.0, access-review 1.1.0, incident-triage 1.1.0, inventory-transfer 1.1.0), `docs/M2C_MULTI_OUTCOME_DESIGN.md`) | **Multi-tool workflow test type** (named tools, simulated tool data, task + workflow checks), written as files, **generator-first with difficulty levels**; the first test type the community can author for | fills `stateful-workflow`; the custom-workflow path for testers |
 | **M2d** (done: `gladiator validate` for workflow@1, `gladiator fork`) | Local validation pipeline (section 6 automated checks) + `gladiator fork` | makes "unreviewed → community" mechanical |
 | **M3** (in progress: recovery family built as `job-queue-recovery`; from `docs/RESEARCH_2026-11.md`: reliability (pass^k) in reports, wording variants in every workflow test, an escalation outcome in `refund-reconciliation` 1.2.0. Next: December calibration on small and mid-tier models, then promotions; the coding family needs a code sandbox) | Harder generator-based versions of the coding and recovery families; calibration runs; fill the official catalog to 4/4/4; prompt-injection variants | decisive head-to-heads between comparable models |
+| **M4** (design agreed 2026-11-24, section 4a; being built) | A test for your own flow: describe, match to the closest test, fork it by its declared choices, validated and sealed. First blueprint: `refund-queue` | lets a person test *their* flow without authoring, on structure that is already trusted |
 | **Later** | Hosted registry and publishing, accounts, ratings and dashboards, sandboxed code-execution test types, the two front ends | all sit on top of packages + run records |
 
 ## 11. Decisions log
@@ -290,3 +333,6 @@ Public tests end up in training data eventually; for an open library that is una
 | 2026-11-21 | Efficiency is the core score (fewest mistakes, least cost, tokens and time), with suite profiles and hard per-attempt budgets; the official gate is "separates models on efficiency"; top-tier difficulty becomes the `frontier` badge for a few tests. The sweet spot is small and mid-tier models on a flow under a hard budget. |
 | 2026-11-21 | Victory rule: success first; both succeed, efficiency; neither, furthest progress; ties broken by efficiency; no real difference is a declared tie. The frontier test combines conflicting sources with a hidden running quota (A + C in `docs/FRONTIER_DESIGN.md`). |
 | 2026-11-21 | Four standard difficulty levels (easy, standard, hard, expert) with shared meanings; the gate applies to the top level; retired versions stay runnable side by side. |
+| 2026-11-24 | A person gets a test for their own flow by describing it, matching it to the closest test in the library and forking that test by its declared open choices (a blueprint); the fork is validated and sealed as a new versioned test (section 4a). |
+| 2026-11-24 | Users change a blueprint's declared values only. Structure (records, tools, decisions, obstacles) changes only by authoring a new blueprint. A person's forks may stay private; platform-authored blueprints are public. |
+| 2026-11-24 | Validation must not be decided by luck: a corner-cutting player that gets through at least once in the first 20 generated worlds is played on more (100, then 300), and the challenge fails when that share is clearly over the allowance. Announced changes must always matter (`when: first_read`); refund-queue 2.3.0 is the first version built that way. Existing versions and their records are left as they are. |
