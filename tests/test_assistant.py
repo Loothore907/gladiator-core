@@ -65,7 +65,7 @@ class ReadingTests(WithAThrowawayLibrary):
     def test_the_list_says_which_tests_can_be_adapted_and_what_a_description_shares_with_each(self):
         every = self.ask("list_tests")
         by_ref = {t["test"]: t for t in every["tests"]}
-        self.assertEqual((by_ref[REFUNDS]["can_be_adapted"], by_ref[REFUNDS]["open_choices"]), (True, 5))
+        self.assertEqual((by_ref[REFUNDS]["can_be_adapted"], by_ref[REFUNDS]["open_choices"]), (True, 6))
         self.assertEqual(every["can_be_adapted"], sum(t["can_be_adapted"] for t in every["tests"]))
         self.assertTrue(any(not t["can_be_adapted"] for t in every["tests"]))  # they are listed, and say so
         self.assertNotIn("shares_words", by_ref[REFUNDS])
@@ -83,7 +83,7 @@ class ReadingTests(WithAThrowawayLibrary):
         self.assertEqual((first["min"], first["max"], first["library_value"]), (7, 180, 60))
         self.assertIn("How many days after payment", first["ask"])
         self.assertGreater(first["used_in_places"], 1)
-        self.assertEqual(len(needs["choices"]), 5)
+        self.assertEqual(len(needs["choices"]), 6)
         self.assertIn("premium window must be longer", " ".join(needs["rules_between_choices"]))
         self.assertIn("60 days ago or less", needs["the_rules"])  # shown with the library's values
         self.assertIn("refund queue", needs["the_job"])
@@ -114,7 +114,7 @@ class DesignTests(WithAThrowawayLibrary):
         self.assertTrue(look["ok"])
         self.assertEqual((look["problems"], look["do_not_fit_together"]), ({}, []))
         self.assertEqual({c["name"] for c in look["changed"]}, set(CHOSEN))
-        self.assertEqual(look["left_as_the_library_has_them"], ["prior_refund_limit", "refund_cap"])
+        self.assertEqual(look["left_as_the_library_has_them"], ["prior_refund_limit", "order_limit", "refund_cap"])
         self.assertIn("paid 30 days ago or less", look["the_rules"])
         self.assertIn('"vip" the limit is 45 days', look["the_rules"])
         self.assertEqual(look["values"]["refund_cap"], 500)
@@ -130,9 +130,9 @@ class DesignTests(WithAThrowawayLibrary):
         self.assertIn("Nothing can be created", look["next"])
 
     def test_a_value_typed_the_way_people_type_is_understood(self):
-        look = self.ask("check_design", test=REFUNDS, values={"refund_window_days": "30 days", "refund_cap": "$1,250"})
+        look = self.ask("check_design", test=REFUNDS, values={"refund_window_days": "30 days", "refund_cap": "$1,000"})
         self.assertEqual(
-            (look["ok"], look["values"]["refund_window_days"], look["values"]["refund_cap"]), (True, 30, 1250)
+            (look["ok"], look["values"]["refund_window_days"], look["values"]["refund_cap"]), (True, 30, 1000)
         )
 
 
