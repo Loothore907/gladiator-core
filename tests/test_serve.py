@@ -251,8 +251,12 @@ class HttpTests(unittest.TestCase):
 
         messages = events(text)
         kinds = [k for k, _ in messages]
-        # every attempt is announced as it ends; single steps and the whole record are not sent
-        self.assertEqual((kinds.count("attempt_end"), kinds.count("step"), kinds.count("record")), (8, 0, 0))
+        # every attempt is announced as it ends; steps come bare (a viewer sees movement, not the calls), and the
+        # whole record is not sent
+        self.assertEqual((kinds.count("attempt_end"), kinds.count("record")), (8, 0))
+        steps = [e for k, e in messages if k == "step"]
+        self.assertTrue(steps)
+        self.assertTrue(all(set(e) == {"event", "side", "attempt", "turn", "tool_name"} for e in steps))
         self.assertEqual(sorted({e["attempt"] for k, e in messages if k == "attempt_end"}), [1, 2, 3, 4])
         batch = messages[-1][1]["batch"]
         self.assertEqual(kinds[-1], "batch")
