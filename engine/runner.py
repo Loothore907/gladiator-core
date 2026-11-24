@@ -318,67 +318,82 @@ def run_contestant(
     repeats: int = 1,
     salt: int = 0,
     on_event=None,
+    parallel: int = 1,
 ):
     """Play every node `repeats` times (a fresh session each time). Results are node-major:
-    node1 attempt1..N, node2 attempt1..N, ... so both contestants' lists line up pair by pair."""
+    node1 attempt1..N, node2 attempt1..N, ... so both contestants' lists line up pair by pair.
+
+    `parallel`: how many attempts of a node this contestant plays at once (default 1: one after another). The
+    attempts are independent sessions on independent worlds, so playing several at once changes how long a batch
+    takes, not what is played; results keep their order, and the one budget still stops every call it must."""
     provider = providers.create(contestant)
     price = price_for(*providers.parse(contestant))
     results, operator = [], []
-    dead = None
+    state = {"dead": None}
+
+    def play(node: dict, attempt: int, own):
+        """One attempt: (public result, private half or None)."""
+        if state["dead"]:
+            return not_run(node, state["dead"], attempt), None
+        if budget.refused:
+            return not_run(node, "budget cap reached", attempt), None
+        emit = emitter(on_event, side=side, model=contestant, node=node["id"], attempt=attempt)
+        emit("attempt_start", name=node["name"], challenge=node["provenance"])
+        try:
+            instance = instance_for(salt, node, attempt, suite, overrides)
+            public, op = run_node(
+                own,
+                price,
+                budget,
+                suite,
+                node,
+                node_settings(suite, node, overrides),
+                instance,
+                attempt_limits(suite, node, overrides),
+                emit,
+            )
+        except FatalProviderError as e:
+            emit("attempt_end", passed=False, termination="not_run", error=str(e))
+            state["dead"] = str(e)
+            say(f"  [{side}] {contestant}: stopping - {e}")
+            return not_run(node, str(e), attempt), None
+        except Exception as e:  # a bug or unexpected SDK error: record it, keep the run going
+            dead = state["dead"] = f"unexpected error: {type(e).__name__}: {e}"
+            emit("attempt_end", passed=False, termination="not_run", error=dead)
+            say(f"  [{side}] {contestant}: {dead}\n{traceback.format_exc()}")
+            return not_run(node, dead, attempt), None
+        public["attempt"] = op["attempt"] = attempt
+        emit(
+            "attempt_end",
+            passed=bool(public["passed"]),
+            termination=public["termination"],
+            calls=public["calls"],
+            cost_usd=public["cost_usd"],
+            wall_s=public["wall_s"],
+            grade_details=public["grade_details"],  # the public half only, as the record will hold it
+        )
+        verdict = "PASS" if public["passed"] else "fail"
+        label = node["name"] + (f" #{attempt}" if repeats > 1 else "")
+        say(
+            f"  [{side}] {contestant:<32} {label:<44} {verdict:<4}  "
+            f"{public['calls']:>2} calls  ${public['cost_usd']:.4f}  {public['termination']}"
+        )
+        return public, op
+
     for node_id in suite["order"]:
         node = get_node(suite, node_id)
-        for attempt in range(1, repeats + 1):
-            if dead:
-                results.append(not_run(node, dead, attempt))
-                continue
-            if budget.refused:
-                results.append(not_run(node, "budget cap reached", attempt))
-                continue
-            emit = emitter(on_event, side=side, model=contestant, node=node["id"], attempt=attempt)
-            emit("attempt_start", name=node["name"], challenge=node["provenance"])
-            try:
-                instance = instance_for(salt, node, attempt, suite, overrides)
-                public, op = run_node(
-                    provider,
-                    price,
-                    budget,
-                    suite,
-                    node,
-                    node_settings(suite, node, overrides),
-                    instance,
-                    attempt_limits(suite, node, overrides),
-                    emit,
-                )
-            except FatalProviderError as e:
-                emit("attempt_end", passed=False, termination="not_run", error=str(e))
-                dead = str(e)
-                say(f"  [{side}] {contestant}: stopping - {dead}")
-                results.append(not_run(node, dead, attempt))
-                continue
-            except Exception as e:  # a bug or unexpected SDK error: record it, keep the run going
-                dead = f"unexpected error: {type(e).__name__}: {e}"
-                emit("attempt_end", passed=False, termination="not_run", error=dead)
-                say(f"  [{side}] {contestant}: {dead}\n{traceback.format_exc()}")
-                results.append(not_run(node, dead, attempt))
-                continue
-            public["attempt"] = op["attempt"] = attempt
-            emit(
-                "attempt_end",
-                passed=bool(public["passed"]),
-                termination=public["termination"],
-                calls=public["calls"],
-                cost_usd=public["cost_usd"],
-                wall_s=public["wall_s"],
-                grade_details=public["grade_details"],  # the public half only, as the record will hold it
-            )
+        attempts = range(1, repeats + 1)
+        if parallel > 1 and repeats > 1:
+            # each attempt at once gets a client of its own: nothing is shared between sessions but the budget
+            with ThreadPoolExecutor(max_workers=parallel) as pool:
+                played = list(pool.map(lambda n, node=node: play(node, n, providers.create(contestant)), attempts))
+        else:
+            played = [play(node, n, provider) for n in attempts]
+        for public, op in played:
             results.append(public)
-            operator.append(op)
-            verdict = "PASS" if public["passed"] else "fail"
-            label = node["name"] + (f" #{attempt}" if repeats > 1 else "")
-            say(
-                f"  [{side}] {contestant:<32} {label:<44} {verdict:<4}  "
-                f"{public['calls']:>2} calls  ${public['cost_usd']:.4f}  {public['termination']}"
-            )
+            if op is not None:
+                operator.append(op)
+    return results, operator
     return results, operator
 
 
@@ -391,6 +406,7 @@ def run_match(
     repeats: int | None = None,
     side_overrides: dict | None = None,
     on_event=None,
+    parallel: int = 1,
 ):
     """on_event: optional callback given one dict per event while the match runs (match_start, attempt_start,
     step, attempt_end, match_end), for a live view. It sees only public facts and cannot affect the match.
@@ -427,8 +443,12 @@ def run_match(
         cap_usd=max_usd,
     )
     with ThreadPoolExecutor(max_workers=2) as pool:
-        fa = pool.submit(run_contestant, "A", contestant_a, suite, budgets["A"], per_side["A"], repeats, salt, on_event)
-        fb = pool.submit(run_contestant, "B", contestant_b, suite, budgets["B"], per_side["B"], repeats, salt, on_event)
+        fa = pool.submit(
+            run_contestant, "A", contestant_a, suite, budgets["A"], per_side["A"], repeats, salt, on_event, parallel
+        )
+        fb = pool.submit(
+            run_contestant, "B", contestant_b, suite, budgets["B"], per_side["B"], repeats, salt, on_event, parallel
+        )
         results_a, operator_a = fa.result()
         results_b, operator_b = fb.result()
     announce("match_end", spent_usd=budgets["A"].spent + budgets["B"].spent, wall_s=round(time.time() - started, 1))
