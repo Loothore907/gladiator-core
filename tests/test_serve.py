@@ -15,9 +15,20 @@ SIX = str(Path(__file__).resolve().parent.parent / "suites" / "six_case_mvp.yaml
 MODELS = ["scripted:golden", "scripted:silent", "scripted:invalid"]
 
 
-def make(folder, total=1.0, per_code=3, codes=None, max_usd=0.2):
+def make(folder, total=1.0, per_code=3, codes=None, max_usd=0.2, batch_sizes=(4,)):
     ledger = serve.Ledger(Path(folder) / "ledger.json", total, per_code)
-    return serve.Races(SIX, MODELS, ledger, max_usd, codes, {"https://page.example"}, runs_dir=Path(folder) / "runs")
+    return serve.Races(
+        SIX,
+        MODELS,
+        ledger,
+        max_usd,
+        codes,
+        {"https://page.example"},
+        runs_dir=Path(folder) / "runs",
+        batch_sizes=batch_sizes,
+        batch_usd_per_run=0.05,
+        batch_parallel=3,
+    )
 
 
 class RulesTests(unittest.TestCase):
@@ -213,6 +224,69 @@ class HttpTests(unittest.TestCase):
         self.assertNotIn("operator", json.dumps(one))
         again = make(self.tmp.name, codes={"judge-1"})
         self.assertEqual(again.races_run()["races"], listed)
+
+    def test_a_batch_plays_one_test_many_times_and_reports_how_steady_each_side_was(self):
+        task = next(iter(self.races.tasks))
+        ask = {"task": task, "a": MODELS[0], "b": MODELS[1], "code": "judge-1"}
+        options = json.load(urllib.request.urlopen(f"{self.url}/options"))
+        self.assertEqual(options["batches"], [{"runs": 4, "cap_usd": 0.2}])
+        # only the sizes on offer; one model against itself needs a batch (one run cannot show steadiness)
+        for bad in ({"runs": 7}, {"runs": "4"}, {"b": MODELS[0]}):
+            with self.assertRaises(urllib.error.HTTPError) as refused:
+                self.post({**ask, **bad})
+            self.assertEqual(refused.exception.code, 400, bad)
+        with mock.patch("builtins.print"):
+            text = self.post({**ask, "runs": 4}).read().decode()
+            same = self.post({**ask, "b": MODELS[0], "runs": 4}).read().decode()
+
+        def events(stream):
+            out = []
+            for block in stream.split("\n\n"):
+                lines = dict(
+                    line.split(": ", 1) for line in block.splitlines() if ": " in line and not line.startswith(":")
+                )
+                if "event" in lines:
+                    out.append((lines["event"], json.loads(lines["data"])))
+            return out
+
+        messages = events(text)
+        kinds = [k for k, _ in messages]
+        # every attempt is announced as it ends; single steps and the whole record are not sent
+        self.assertEqual((kinds.count("attempt_end"), kinds.count("step"), kinds.count("record")), (8, 0, 0))
+        self.assertEqual(sorted({e["attempt"] for k, e in messages if k == "attempt_end"}), [1, 2, 3, 4])
+        batch = messages[-1][1]["batch"]
+        self.assertEqual(kinds[-1], "batch")
+        self.assertEqual((batch["runs"], batch["same_model"], batch["a"], batch["b"]), (4, False, MODELS[0], MODELS[1]))
+        self.assertEqual((batch["a_attempts"], batch["b_attempts"], len(batch["scenarios"])), (4, 4, 4))
+        self.assertEqual(batch["pairs"], batch["a_wins"] + batch["b_wins"] + batch["ties"])
+        # the golden player passes every time; the silent one never does, and its faults are counted by attempt
+        self.assertEqual((batch["a_passed"], batch["b_passed"], batch["a_wins"]), (4, 0, 4))
+        self.assertTrue(batch["b_faults"] or batch["b_endings"])
+        self.assertTrue(all(count <= 4 for count in batch["b_faults"].values()))
+        # the sealed record is on file with all eight attempts, in order, and each side's worlds line up
+        sealed = json.loads((Path(self.tmp.name) / "runs" / batch["run_id"] / "record.json").read_text())
+        self.assertEqual(record.sha256(sealed["body"]), batch["seal"])
+        self.assertEqual(sealed["body"]["settings"]["repeats"], 4)
+        for side in ("A", "B"):
+            self.assertEqual([r["attempt"] for r in sealed["body"]["contestants"][side]["results"]], [1, 2, 3, 4])
+        # one model on both sides: it agrees with itself on every scenario
+        own = events(same)[-1][1]["batch"]
+        self.assertEqual((own["same_model"], own["a_passed"], own["b_passed"], own["same_result"]), (True, 4, 4, 4))
+        # the hold was the batch's cap, nothing is still held, and each batch used one of the sign-in's goes
+        charged = self.races.ledger.state["providers"]["scripted"]
+        self.assertEqual(charged["held_usd"], 0.0)
+        self.assertEqual(self.races.ledger.state["by_code"], {serve.who_of("judge-1"): 2})
+        # batches are listed apart from single races, and a restarted server reads them back from disk
+        listed = json.load(urllib.request.urlopen(f"{self.url}/races"))
+        self.assertEqual(
+            (len(listed["races"]), [b["run_id"] for b in listed["batches"]]), (0, [batch["run_id"], own["run_id"]])
+        )
+        again = make(self.tmp.name, codes={"judge-1"})
+        key = lambda b: b["run_id"]  # noqa: E731  (two batches filed in the same second have no order of their own)
+        self.assertEqual(sorted(again.races_run()["batches"], key=key), sorted(listed["batches"], key=key))
+        # a server with no sizes offers no batches at all
+        with self.assertRaises(serve.Refused):
+            make(self.tmp.name, codes={"judge-1"}, batch_sizes=()).check({**ask, "runs": 4})
 
     def test_signing_in_over_http_then_racing_with_the_session_only(self):
         def signin(ask):
