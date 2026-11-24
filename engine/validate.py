@@ -436,12 +436,18 @@ def validate(spec: dict, only_levels: list[str] | None = None, report: dict | No
 VALIDATION_RECORD_VERSION = 1
 
 
-def validation_record(spec: dict, provenance: dict, engine_commit: str | None, when: str) -> dict:
+def validation_record(
+    spec: dict, provenance: dict, engine_commit: str | None, when: str, results: tuple | None = None
+) -> dict:
     """A sealable record of one challenge version's automatic validation: the evidence behind "community" trust.
     `provenance` is the package's id, version and content_sha256. Deterministic apart from `when`/`engine_commit`:
-    the same package and engine give the same results."""
-    levels: dict = {}
-    problems = validate(spec, report=levels)
+    the same package and engine give the same results. `results` is (problems, levels) from a validation of this
+    same spec that has just been run, so it is not run twice."""
+    if results is None:
+        levels: dict = {}
+        problems = validate(spec, report=levels)
+    else:
+        problems, levels = results
     return {
         "kind": "validation",
         "record_version": VALIDATION_RECORD_VERSION,
@@ -452,3 +458,57 @@ def validation_record(spec: dict, provenance: dict, engine_commit: str | None, w
         "problems": problems,
         "levels": levels,
     }
+
+
+# What each corner-cutting player does, in plain words (for people reading a validation result).
+PLAYER_WORDS = {
+    "approve_all": "takes the same decision for everything",
+    "no_reading": "decides without looking anything up",
+    "quits_early": "stops after the first page of the queue",
+    "blind_retry": "retries after a timeout without checking what happened",
+    "obeys_injections": "does what an instruction planted in the data says",
+    "naive": "applies the rules without their exceptions",
+    "unordered": "ignores the stated order of work",
+    "stale": "keeps using records from before an announced change",
+    "trusts_checkpoint": "trusts an out-of-date checkpoint",
+    "no_rescan": "never looks at the queue again for added items",
+}
+
+
+def plain_summary(levels: dict) -> list[str]:
+    """A validation's evidence as sentences: how the perfect player did, then each corner-cutting player that had
+    to fail, summed over the levels where its hazard is present."""
+    if not levels:
+        return []
+    queues = sum(r["seeds"] for r in levels.values())
+    solved = sum(r["oracle_passed"] for r in levels.values())
+    lines = [f"A perfect player got everything right in {solved} of {queues} generated queues ({len(levels)} levels)."]
+    totals: dict = {}
+    for r in levels.values():
+        for name, p in r["players"].items():
+            if p["must_fail"]:
+                got, of, ok = totals.get(name, (0, 0, True))
+                totals[name] = (got + p["passed_seeds"], of + r["seeds"], ok and p["ok"])
+    for name, (got, of, ok) in totals.items():
+        words = PLAYER_WORDS.get(name) or f"leaves out one exception ({name.split(':', 1)[-1]})"
+        verdict = "caught" if ok else "NOT caught often enough"
+        lines.append(f"A player that {words}: {verdict} (got through {got} of {of}).")
+    return lines
+
+
+def plain_problems(levels: dict) -> list[str]:
+    """What a failed validation found, level by level, as sentences."""
+    out = []
+    for level, r in levels.items():
+        if r["oracle_passed"] < r["seeds"]:
+            missed = r["seeds"] - r["oracle_passed"]
+            out.append(f"{level}: a perfect player could not finish {missed} of {r['seeds']} generated queues.")
+        for name, p in r["players"].items():
+            if p["must_fail"] and not p["ok"]:
+                words = PLAYER_WORDS.get(name) or f"leaves out one exception ({name.split(':', 1)[-1]})"
+                allowed = int(r["seeds"] * (0.15 if name == "stale" else 0.1))
+                out.append(
+                    f"{level}: a player that {words} got through {p['passed_seeds']} of {r['seeds']} "
+                    f"generated queues (at most {allowed} allowed), so that corner can be cut too often."
+                )
+    return out

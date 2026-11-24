@@ -79,6 +79,7 @@ provider's reported token usage.
 gladiator.py          the command
 suites/               suite files (nodes + links), YAML or JSON
 challenges/           locked, versioned challenge packages (the 10 v1 cases are the first official ones)
+blueprints/           the open choices of a challenge version (what a fork may change), beside the sealed package
 modules/              test types; v1_case.py (v1-simulator@1) runs the ten v1 simulators
 simulators/           the v1 case simulators, byte-for-byte, with SHA-256 pins (PINS.json)
 providers/            anthropic / openai / google adapters, one shared interface, prices.yaml
@@ -105,6 +106,15 @@ Dockerfile            the Linux container
 - `uv run gladiator fork <namespace/name@version> --to <namespace/new-name>` (a fork, `forked_from` set) or
   `--version X.Y.Z` (a new version) copies a challenge as the starting point for an edit; it starts as
   `unreviewed`. Edit, re-seal with `fingerprint --write`, then `validate`.
+- **Forking by choices** (no editing): a test can declare its open choices in a blueprint
+  (`blueprints/<namespace>/<name>@<version>.yaml`): named values such as a time limit or an amount cap, each with
+  a question, a default and limits. `uv run gladiator blueprints "your flow in your own words"` finds the closest
+  tests, `uv run gladiator choices <namespace/name@version>` lists what one lets you change, and
+  `uv run gladiator fork <namespace/name@version> --to <yourname/your-test> --set <choice>=<value>` writes a new
+  sealed test, its validation record and a one-test suite. A value is written once and lands in the grading rule,
+  the wording the model reads and the near-miss records together. Values outside the declared choices are
+  refused, and nothing is written unless automatic validation passes. Structure (records, tools, decisions,
+  obstacles) cannot be changed this way.
 - `uv run gladiator validate <namespace/name@version>` checks a `workflow@1` challenge automatically: an
   oracle player must pass it and a set of deliberately bad players must fail it, at every difficulty.
 - A **test type** is the engine code that runs a kind of challenge (`modules/`, registered in
