@@ -972,7 +972,12 @@ def handler_for(races: Races, forks: Forks | None = None):
             batch = (ask.get("runs") or 1) > 1  # a batch streams its attempts, not every step of each
             quiet_since = time.time()
             while event is not None:
-                if listening and not (batch and event["event"] == "step"):
+                if listening and batch and event["event"] == "step":
+                    # a batch is too much to watch call by call, but a viewer must see it move: the bare step
+                    slim = {k: event.get(k) for k in ("event", "side", "attempt", "turn", "tool_name")}
+                    listening = send("step", slim)
+                    quiet_since = time.time()
+                elif listening:
                     listening = send(event["event"], event)
                     quiet_since = time.time()
                 elif listening and time.time() - quiet_since > HEARTBEAT_S:
