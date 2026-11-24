@@ -108,7 +108,7 @@ class ModelReader:
         tests = [{"ref": c["ref"], "name": c["name"], "what_it_tests": c["description"]} for c in candidates]
         picked = self._call(PICK_RULES, {"description": description, "tests": tests}, pick) or {}
         ref = picked.get("ref") if picked.get("ref") in refs else None
-        out = {"ref": ref, "why": str(picked.get("why") or "")[:300], "values": {}, "not_covered": []}
+        out = {"ref": ref, "why": one_sentence(picked.get("why") or ""), "values": {}, "not_covered": []}
         bp = blueprint.load(ref, root) if ref else None
         if not bp:
             return out
@@ -136,6 +136,13 @@ class ModelReader:
         if isinstance(notes, list):
             out["not_covered"] = [str(n)[:160] for n in notes if str(n).strip()][:MAX_NOT_COVERED]
         return out
+
+
+def one_sentence(text: str, limit: int = 240) -> str:
+    """The first sentence of what a model wrote, so a long answer is cut at a full stop and not mid-word."""
+    text = " ".join(str(text).split())
+    first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
+    return first if len(first) <= limit else first[: limit - 3].rsplit(" ", 1)[0] + "..."
 
 
 def slug(text: str) -> str:

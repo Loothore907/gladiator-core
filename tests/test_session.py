@@ -214,6 +214,14 @@ class ReaderTests(unittest.TestCase):
         self.assertTrue(any("outside the allowed range" in u for u in chosen["unusable"]))
         self.assertEqual(len(chosen["not_covered"]), session.MAX_NOT_COVERED)
 
+    def test_a_long_reason_is_cut_at_a_sentence_not_mid_word(self):
+        long = "Both decide refund requests against a policy. " + "The test also has many other details. " * 20
+        self.assertEqual(
+            self.read(pick_test={"ref": REFUNDS, "why": long})["why"], "Both decide refund requests against a policy."
+        )
+        self.assertTrue(session.one_sentence("word " * 200).endswith("..."))
+        self.assertLessEqual(len(session.one_sentence("word " * 200)), 240)
+
     def test_it_may_say_no_test_is_the_same_kind_of_job(self):
         found = self.read(pick_test={"ref": "none", "why": "Yours schedules deliveries; none of these does."})
         self.assertIsNone(found["proposed"])
