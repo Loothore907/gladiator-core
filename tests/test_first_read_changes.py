@@ -76,6 +76,21 @@ class FirstReadChangeTests(unittest.TestCase):
                 self.assertTrue(play(Workflow(self.spec, seed=seed, difficulty=level), "oracle").passed, (level, seed))
                 self.assertFalse(play(Workflow(self.spec, seed=seed, difficulty=level), "stale").passed, (level, seed))
 
+    def test_the_grade_names_each_wrong_decision_and_the_tool_behind_each_outcome(self):
+        tools = {t["name"] for t in self.spec["tools"]}
+        seen = 0
+        for seed in range(1, 11):
+            careful = play(Workflow(self.spec, seed=seed, difficulty="standard"), "oracle").details
+            self.assertEqual(careful["mistakes"], {})
+            stale = play(Workflow(self.spec, seed=seed, difficulty="standard"), "stale").details
+            # one entry per wrongly decided item, as "expected->chosen", and nothing for an item it got right
+            self.assertEqual(len(stale["mistakes"]), stale["wrong"])
+            self.assertTrue(set(stale["mistakes"].values()) <= {"approve->deny", "deny->approve"})
+            self.assertEqual(set(stale["outcome_tools"]), {"approve", "deny"})
+            self.assertTrue(set(stale["outcome_tools"].values()) <= tools)
+            seen += stale["wrong"]
+        self.assertGreater(seen, 0)  # the careless player did decide something wrongly: the check tested something
+
     def test_planned_timeouts_fall_on_calls_no_change_can_remove(self):
         # A change can turn an approval into a denial, so a timeout planned for "the third refund" could wait for a
         # refund that never happens. Timeouts are planned among the calls that are certain.
