@@ -1136,9 +1136,9 @@ class RefundQueueV2Tests(unittest.TestCase):
 
         old, new = packages.resolve("gladiator/refund-queue@1.0.0"), packages.resolve("gladiator/refund-queue@2.0.0")
         self.assertNotEqual(old.fingerprint, new.fingerprint)
-        self.assertEqual(packages.catalog()["gladiator/refund-queue"].manifest["version"], "2.2.0")  # newest
+        self.assertEqual(packages.catalog()["gladiator/refund-queue"].manifest["version"], "2.3.0")  # newest
         self.assertEqual(old.status["status"], "retired")
-        with self.assertRaisesRegex(packages.PackageError, "has 1.0.0, 2.0.0, 2.1.0, 2.2.0"):
+        with self.assertRaisesRegex(packages.PackageError, "has 1.0.0, 2.0.0, 2.1.0, 2.2.0, 2.3.0"):
             packages.resolve("gladiator/refund-queue@3.0.0")
 
     def _one_approval(self, level="expert"):
