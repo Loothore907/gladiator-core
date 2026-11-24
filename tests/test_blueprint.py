@@ -77,6 +77,9 @@ class BlueprintTests(unittest.TestCase):
             "cannot be used as a name": {"premium_tier": "yes"},
             "must be longer than the standard": {"refund_window_days": 90, "premium_window_days": 60},
             "different name from the standard tier": {"premium_tier": "standard"},
+            # the payout cap and the order limit are separate choices, within limits of each other
+            "at most 4 times the payout cap": {"refund_cap": 100},  # the order limit stays at 500
+            "at most twice the order limit": {"refund_cap": 1200},
         }
         for expected, given in cases.items():
             _, bad = blueprint.check_values(self.bp, given)
@@ -93,9 +96,13 @@ class BlueprintTests(unittest.TestCase):
         # Values well away from the defaults, and the two ends of a range: the fork is still solvable, and every
         # corner-cutting player is still caught, including the one that ignores an announced change.
         for given in (
-            {"refund_window_days": 14, "premium_window_days": 30, "prior_refund_limit": 2, "refund_cap": 100},
+            {"refund_window_days": 14, "premium_window_days": 30, "prior_refund_limit": 2, "refund_cap": 100}
+            | {"order_limit": 100},
             {"refund_window_days": 7, "premium_window_days": 8},
-            {"refund_cap": 50000, "prior_refund_limit": 6},
+            {"refund_cap": 50000, "order_limit": 50000, "prior_refund_limit": 6},
+            # the two amounts apart, at each end of what is allowed: a cap well under the order limit, and over it
+            {"refund_cap": 250, "order_limit": 1000},
+            {"refund_cap": 500, "order_limit": 250},
         ):
             values, bad = blueprint.check_values(self.bp, given)
             self.assertEqual(bad, [])
@@ -104,6 +111,28 @@ class BlueprintTests(unittest.TestCase):
             self.assertEqual(validate(spec, only_levels=["standard", "hard"], report=report), [], given)
             self.assertEqual(report["hard"]["players"]["stale"]["passed_seeds"], 0, given)
         self.assertIn("A perfect player got everything right in 40 of 40", plain_summary(report)[0])
+
+    def test_the_payout_cap_and_the_order_limit_are_separate_choices(self):
+        # One value used to set both. A person who meant only "never pay out more than 250" also moved the order
+        # amount above which only damaged or undelivered orders are refunded.
+        values, bad = blueprint.check_values(self.bp, {"refund_cap": 250})
+        self.assertEqual(bad, [])
+        spec = yaml.safe_load(blueprint.render(self.bp, values))
+        self.assertEqual(spec["task"]["amount_rule"], "min(order.amount, 250)")
+        self.assertIn("order.amount <= 500 or request.reason in", spec["task"]["policy"])
+        rules = " ".join(spec["task"]["policy_text"].split())
+        self.assertIn("(4) The order amount is 500 or less.", rules)
+        self.assertIn("an order over 500 may still be approved", rules)
+        self.assertIn("never more than 250 (an approved order of 390 is refunded 250)", rules)
+        self.assertIn("order.amount <= 500", spec["validation"]["naive_policy"])
+        for wording in spec["wordings"]:  # every rewording says the same two numbers
+            text = " ".join(wording["policy_text"].split())
+            self.assertEqual((text.count("500"), text.count("250")), (2, 2), text)
+        # the near-miss records sit at the order limit, and one damaged order is over both amounts
+        amounts = [v.get("amount") for v in spec["hazards"]["distractor_variants"] if "amount" in v]
+        self.assertEqual(amounts[:3], [501, 640, 500])
+        self.assertEqual(spec["world"]["orders"]["fields"]["amount"], {"range": [5, 750]})
+        self.assertEqual(blueprint.changed(self.bp, values), [{"name": "refund_cap", "from": 500, "to": 250}])
 
     def test_a_failed_check_is_said_in_plain_words(self):
         levels = {

@@ -89,7 +89,7 @@ class DescribeTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             found = make(tmp).describe({"description": DESCRIPTION})
             test = found["test"]
-            self.assertEqual((found["proposed"], test["ref"], len(test["questions"])), (REFUNDS, REFUNDS, 5))
+            self.assertEqual((found["proposed"], test["ref"], len(test["questions"])), (REFUNDS, REFUNDS, 6))
             first = test["questions"][0]
             self.assertEqual(
                 (first["name"], first["value"], first["min"], first["max"]), ("refund_window_days", 60, 7, 180)

@@ -74,7 +74,7 @@ class WithoutAModelTests(unittest.TestCase):
         self.talk.describe(DESCRIPTION)
         chosen = self.talk.choose(REFUNDS)
         first = chosen["questions"][0]
-        self.assertEqual(len(chosen["questions"]), 5)
+        self.assertEqual(len(chosen["questions"]), 6)
         self.assertEqual((first["name"], first["value"], first["source"]), ("refund_window_days", 60, None))
         self.assertEqual((first["min"], first["max"], first["unit"]), (7, 180, "days"))
         self.assertIn("How many days after payment", first["ask"])
@@ -163,6 +163,7 @@ class ReaderTests(unittest.TestCase):
                 "premium_window_days",
                 "premium_tier",
                 "prior_refund_limit",
+                "order_limit",
                 "refund_cap",
             },
         )
@@ -269,15 +270,26 @@ class ChatCommandTests(unittest.TestCase):
 
     def test_a_whole_conversation_up_to_the_last_question(self):
         typed = "\n".join(
-            ["we refund customers for damaged or late orders", "y", "30", "45 days", "vip", "", "$250", "returns desk"]
+            [
+                "we refund customers for damaged or late orders",
+                "y",
+                "30",
+                "45 days",
+                "vip",
+                "",
+                "",
+                "$250",
+                "returns desk",
+            ]
             + ["demo", "n"]
         )
         out = self.chat(typed + "\n")
         self.assertEqual(out.returncode, 0, out.stderr)
         said = out.stdout
         self.assertIn("Closest test: Refund queue (gladiator/refund-queue@2.3.0)", said)
-        self.assertIn("This test lets you change 5 things", said)
-        self.assertIn("1 of 5  How many days after payment can an order still be refunded?", said)
+        self.assertIn("This test lets you change 6 things", said)
+        self.assertIn("1 of 6  How many days after payment can an order still be refunded?", said)
+        self.assertIn("5 of 6  Above what order amount is a refund given only for damaged or undelivered orders?", said)
         self.assertIn("(2) The order was paid 30 days ago or less", said)  # the answers, in the rules a model reads
         self.assertIn('tier is "vip" the limit is 45 days', said)
         self.assertIn("refund_cap 500 -> 250", said)
@@ -286,7 +298,7 @@ class ChatCommandTests(unittest.TestCase):
         self.assertFalse((ROOT / "challenges" / "demo").exists())
 
     def test_a_wrong_answer_and_a_broken_rule_are_explained_and_asked_again(self):
-        typed = "\n".join(["refund requests", "y", "90", "60", "", "", "lots", "", "", "120", "x", "y", "n"])
+        typed = "\n".join(["refund requests", "y", "90", "60", "", "", "lots", "", "", "", "120", "x", "y", "n"])
         said = self.chat(typed + "\n").stdout
         self.assertIn("'lots' is not a whole number. Try again, or press Enter to keep 500.", said)
         self.assertIn("The premium window must be longer than the standard refund window.", said)

@@ -67,4 +67,6 @@ def test_a_real_model_reads_a_description(contestant):
     assert understood.get("refund_window_days") == 30
     assert understood.get("premium_window_days") == 45
     assert understood.get("refund_cap") == 250
+    # "never pays out more than 250" is the payout cap. It says nothing about which orders can be refunded at all.
+    assert "order_limit" not in understood
     assert "prior_refund_limit" not in understood  # the description does not state it, so it must not be filled in
