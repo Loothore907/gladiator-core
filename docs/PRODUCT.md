@@ -222,6 +222,10 @@ fingerprint stay the same.
 2. A **reference solution passes**, so the challenge is solvable as stated.
 3. Known-bad behaviour **fails** (e.g. invalid actions, skipping a required step), so the grader actually
    grades.
+   A corner-cutting player can get lucky in a generated world, so how often it gets through is measured on
+   enough worlds that luck cannot pass or fail a challenge (20 first; a player that got through at least once
+   is played on 100, then 300 if that still cannot tell). The allowance is 10% (15% for the player that ignores
+   announced changes), and a challenge fails when its share is clearly over it. Details: `docs/RUN_RECORD.md`, "Validation records".
 4. **No leaks**: nothing from operator data appears in the public packet.
 5. Generators: a sample of instances is valid and solvable.
 
@@ -331,3 +335,4 @@ Public tests end up in training data eventually; for an open library that is una
 | 2026-11-21 | Four standard difficulty levels (easy, standard, hard, expert) with shared meanings; the gate applies to the top level; retired versions stay runnable side by side. |
 | 2026-11-24 | A person gets a test for their own flow by describing it, matching it to the closest test in the library and forking that test by its declared open choices (a blueprint); the fork is validated and sealed as a new versioned test (section 4a). |
 | 2026-11-24 | Users change a blueprint's declared values only. Structure (records, tools, decisions, obstacles) changes only by authoring a new blueprint. A person's forks may stay private; platform-authored blueprints are public. |
+| 2026-11-24 | Validation must not be decided by luck: a corner-cutting player that gets through at least once in the first 20 generated worlds is played on more (100, then 300), and the challenge fails when that share is clearly over the allowance. Announced changes must always matter (`when: first_read`); refund-queue 2.3.0 is the first version built that way. Existing versions and their records are left as they are. |

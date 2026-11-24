@@ -49,11 +49,22 @@ are committed to the repository.
 
 | Field | What |
 |---|---|
-| `kind`, `record_version` | `"validation"`, schema version (1). |
+| `kind`, `record_version` | `"validation"`, schema version (2; see below for 1). |
 | `challenge` | id, version and `content_sha256` of the exact package validated. |
 | `engine_commit`, `validated_at` | Engine commit and UTC time. |
 | `valid`, `problems` | The verdict and every problem found (empty when valid). |
-| `levels.<level>` | `seeds` played, `oracle_passed` (the reference player must pass every seed), and `players`: for each corner-cutting player, `must_fail` (its hazard is present at this level), `passed_seeds` (how often it got through anyway) and `ok` (within the allowed 10%, 15% for `stale`). |
+| `levels.<level>` | `seeds` (the first look: the queues the reference player and every corner-cutting player were played on), `oracle_passed` (the reference player must pass every one), and `players`: for each corner-cutting player, `must_fail` (its hazard is present at this level), `seeds` (the queues it was played on), `passed_seeds` (how often it got through anyway), `allowed` (the share it may get through: 0.10, or 0.15 for `stale`) and `ok`. |
+
+**How a corner-cutting player is judged (record version 2, 2026-11-24).** A player may get lucky in a generated
+queue (a fault never fires, a near miss is not in its path), so what matters is how often. Twenty queues cannot tell
+a player that gets through 1 time in 10 from one that gets through 3 times in 10, so luck used to pass or fail a
+challenge. Now: every player is played on the first 20 queues. One that never got through is caught. One that got
+through at least once is played on 100 queues, and on 300 if that still cannot tell: it is `ok` when the 95% range of
+its share lies within the allowance and not `ok` when the whole range lies above it. After 300 queues a share that is
+still not clearly above the allowance is `ok`: a challenge fails this check on evidence, not on a difference that
+could be chance (at 300 queues that means a measured share about 3 to 4 points over the allowance). **Version 1 records** (before 2026-11-24) have no `seeds` or `allowed` per player: every player was judged
+on the first 20 queues only (`ok` when at most 2 of 20, or 3 of 20 for `stale`). They are kept as written; a
+challenge can be validated again at any time, for free.
 
 ## Changing the format
 Add fields; never rename or drop one. Bump `RECORD_VERSION` in `engine/runner.py`, describe the change here,

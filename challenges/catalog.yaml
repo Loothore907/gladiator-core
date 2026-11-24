@@ -744,6 +744,10 @@ challenges:
       (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
       rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
       calibration evidence of 2.1.0 carries over.
+      RE-VALIDATED 2026-11-24 under the sounder sampling (docs/RUN_RECORD.md, "Validation records"): not valid at
+      the standard level, where a player that ignores the announced changes gets through 25 of 100 generated
+      queues (15% allowed; the first 20 showed 2). Every other check passes at every level. The cause is changes
+      timed by action count, fixed in 2.3.0. The status above predates this finding and has not been changed.
     evidence:
       - "gladiator validate gladiator/refund-queue@2.2.0 (all levels, run locally on 2026-11-21)"
       - "calibration of gladiator/refund-queue@2.1.0 (see that entry)"
@@ -797,6 +801,12 @@ challenges:
       (same for both contestants; recorded as `wording` in the grade details). The validator checks that every
       rewording keeps the policy's numbers and quoted values. Rules, worlds and hazards are unchanged, so the
       calibration evidence of 1.1.0 carries over.
+      RE-VALIDATED 2026-11-24 under the sounder sampling (docs/RUN_RECORD.md, "Validation records"): not valid at
+      the standard level (a player that ignores the announced changes gets through 24 of 100 generated queues)
+      and the hard level (58 of 300), against 15% allowed; the first 20 queues showed 1 at each. Every other check
+      passes at every level. The cause is changes timed by action count (see refund-queue 2.3.0 for the fix);
+      no fixed version of this challenge exists yet. The status above predates this finding and has not been
+      changed.
     evidence:
       - "gladiator validate gladiator/incident-triage@1.2.0 (all levels, run locally on 2026-11-21)"
       - "calibration of gladiator/incident-triage@1.1.0 (see that entry)"
