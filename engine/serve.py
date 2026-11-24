@@ -80,6 +80,78 @@ def summary(sealed: dict) -> dict:
     }
 
 
+def batch_summary(sealed: dict) -> dict:
+    """The public facts of one live batch (one test played many times), from its sealed record: how often each
+    side passed, which faults showed and how often, who won each scenario, and what it cost."""
+    from scorers.confidence import sign_test
+    from scorers.outcome import pair_outcome
+
+    body = sealed["body"]
+    sides = {side: body["contestants"][side] for side in ("A", "B")}
+    profile = (body["suite"].get("success") or {}).get("profile", "balanced")
+    out = {
+        "run_id": body["run_id"],
+        "seal": sealed["sha256"],
+        "task": (body["suite"].get("order") or [None])[0],
+        "a": sides["A"]["id"],
+        "b": sides["B"]["id"],
+        "same_model": sides["A"]["id"] == sides["B"]["id"],
+        "runs": int((body.get("settings") or {}).get("repeats") or len(sides["A"]["results"])),
+        "difficulty": (body.get("settings") or {}).get("defaults", {}).get("difficulty"),
+        "profile": profile,
+        "spent_usd": float((body.get("budget") or {}).get("spent_usd") or 0),
+    }
+    for side, key in (("A", "a"), ("B", "b")):
+        played = [r for r in sides[side]["results"] if r.get("termination") not in components.NOT_COMPARABLE]
+        faults: dict[str, int] = {}
+        endings: dict[str, int] = {}
+        for r in played:
+            for name, value in (r.get("grade_details") or {}).items():
+                if (
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and value
+                    and name not in ("items", "correct")
+                ):
+                    faults[name] = faults.get(name, 0) + 1  # attempts the fault showed in, not how many times
+            if not r.get("passed"):
+                endings[r.get("termination")] = endings.get(r.get("termination"), 0) + 1
+        out[f"{key}_attempts"] = len(played)
+        out[f"{key}_passed"] = sum(1 for r in played if r.get("passed"))
+        out[f"{key}_not_run"] = len(sides[side]["results"]) - len(played)
+        out[f"{key}_cost_usd"] = round(sum(float(r.get("cost_usd") or 0) for r in played), 6)
+        out[f"{key}_seconds"] = (
+            round(sum(float(r.get("wall_s") or 0) for r in played) / len(played), 1) if played else 0.0
+        )
+        out[f"{key}_faults"] = faults
+        out[f"{key}_endings"] = endings
+    # scenario by scenario: the same world for both sides, judged by the engine's own victory rule
+    scenarios = []
+    for ra, rb in zip(sides["A"]["results"], sides["B"]["results"], strict=True):
+        bad = [r for r in (ra, rb) if r.get("termination") in components.NOT_COMPARABLE]
+        won = None if bad else pair_outcome(ra, rb, profile)["winner"]
+        scenarios.append(
+            {
+                "a_passed": None if bad else bool(ra.get("passed")),
+                "b_passed": None if bad else bool(rb.get("passed")),
+                "winner": won,
+            }
+        )
+    judged = [x for x in scenarios if x["winner"]]
+    out["scenarios"] = scenarios
+    out["pairs"] = len(judged)
+    out["a_wins"] = sum(1 for x in judged if x["winner"] == "A")
+    out["b_wins"] = sum(1 for x in judged if x["winner"] == "B")
+    out["ties"] = sum(1 for x in judged if x["winner"] == "tie")
+    out["same_result"] = sum(1 for x in judged if x["a_passed"] == x["b_passed"])  # both passed, or both did not
+    out["p_value"] = sign_test(out["a_wins"], out["b_wins"])
+    return out
+
+
+def is_batch(sealed: dict) -> bool:
+    return int((sealed["body"].get("settings") or {}).get("repeats") or 1) > 1
+
+
 LIVE_LEVELS = ("easy", "standard")  # harder levels take too long and cost too much to watch live
 HEARTBEAT_S = 10  # hosts cut a stream that stays silent; a comment line keeps it open
 MAX_BODY = 4096
@@ -199,7 +271,15 @@ class Races:
         codes: set[str] | None = None,
         origins: set[str] | None = None,
         runs_dir: Path | None = None,
+        batch_sizes: tuple[int, ...] = (),
+        batch_usd_per_run: float = 0.06,
+        batch_parallel: int = 5,
     ):
+        # Batches: one test played `runs` times in one go (two models, or one model on both sides to see how
+        # steadily it does the job). Off unless sizes are given. A batch's cap is `batch_usd_per_run` x runs.
+        self.batch_sizes = tuple(sorted({int(n) for n in batch_sizes if int(n) > 1}))
+        self.batch_usd_per_run, self.batch_parallel = float(batch_usd_per_run), max(1, int(batch_parallel))
+        self.batches: list[dict] = []
         self.base_path = base_suite
         self.base = yaml.safe_load(Path(base_suite).read_bytes())
         loaded = suites.load(base_suite)
@@ -226,7 +306,11 @@ class Races:
         self.results: list[dict] = []
         for path in sorted(Path(runs_dir).glob("*/record.json")) if runs_dir else []:
             try:
-                self.results.append(summary(json.loads(path.read_text(encoding="utf-8"))))
+                sealed = json.loads(path.read_text(encoding="utf-8"))
+                if is_batch(sealed):
+                    self.batches.append(batch_summary(sealed))
+                else:
+                    self.results.append(summary(sealed))
             except (ValueError, KeyError, TypeError):
                 continue  # not a race record: leave it out, never guess
         # Sessions are signed with a key made from the invites themselves: nothing more to store or to leak,
@@ -283,9 +367,13 @@ class Races:
             for name, limit in sorted(self.ledger.by_provider.items())
         ]
 
-    def affordable(self, model: str) -> bool:
+    def cap_for(self, runs: int) -> float:
+        """The hard cap of one request: a race's, or a batch's (so much per run)."""
+        return self.max_usd if runs <= 1 else round(self.batch_usd_per_run * runs, 6)
+
+    def affordable(self, model: str, runs: int = 1) -> bool:
         left = self.ledger.left_for(providers.parse(model)[0])
-        return left is None or left + 1e-9 >= self.max_usd
+        return left is None or left + 1e-9 >= self.cap_for(runs)
 
     def options(self) -> dict:
         return {
@@ -298,11 +386,13 @@ class Races:
             "budgets": self.budgets(),
             "profiles": sorted(PROFILES),
             "cap_usd_per_race": self.max_usd,
+            # batches on offer: how many runs, and the cap of each size
+            "batches": [{"runs": n, "cap_usd": self.cap_for(n)} for n in self.batch_sizes],
             "needs_code": self.codes is not None,
         }
 
     def races_run(self) -> dict:
-        return {"races": list(self.results)}
+        return {"races": list(self.results), "batches": list(self.batches)}
 
     def health(self) -> dict:
         return {
@@ -324,10 +414,14 @@ class Races:
         a, b = ask.get("a"), ask.get("b")
         if a not in self.models or b not in self.models:
             raise Refused(400, "Both models must come from the list this server offers.")
-        if a == b:
+        runs = ask.get("runs") or 1
+        if runs != 1 and runs not in self.batch_sizes:
+            offered = ", ".join(str(n) for n in self.batch_sizes) or "none on this server"
+            raise Refused(400, f"A batch must be one of these sizes: {offered}.")
+        if a == b and runs == 1:  # one model against itself is a steadiness check, and one run cannot show that
             raise Refused(400, "Choose two different models.")
         for model in (a, b):
-            if not self.affordable(model):
+            if not self.affordable(model, runs):
                 name = providers.parse(model)[0]
                 raise Refused(
                     402, f"The live budget for {name} models is used up. Choose models from another provider."
@@ -338,14 +432,15 @@ class Races:
         profile = ask.get("profile") or "budget"
         if profile not in PROFILES:
             raise Refused(400, f"Profile must be one of: {', '.join(sorted(PROFILES))}.")
-        return {"task": task, "a": a, "b": b, "difficulty": level, "profile": profile, "who": who}
+        return {"task": task, "a": a, "b": b, "difficulty": level, "profile": profile, "who": who, "runs": runs}
 
     def suite_for(self, ask: dict) -> dict:
         """The one-scenario suite a race plays: the base suite's settings and locked challenge, configured."""
+        how_many = "One live scenario" if ask.get("runs", 1) == 1 else f"{ask['runs']} live scenarios"
         data = {
-            "suite": "live-race",
+            "suite": "live-race" if ask.get("runs", 1) == 1 else "live-batch",
             "version": 1,
-            "description": f"One live scenario of {ask['task']} ({ask['difficulty']}, {ask['profile']} profile).",
+            "description": f"{how_many} of {ask['task']} ({ask['difficulty']}, {ask['profile']} profile).",
             "defaults": {**(self.base.get("defaults") or {}), "difficulty": ask["difficulty"]},
             "success": {**(self.base.get("success") or {}), "profile": ask["profile"]},
             "nodes": [{"id": ask["task"], "challenge": self.tasks[ask["task"]]["challenge"]}],
@@ -358,22 +453,32 @@ class Races:
         return loaded
 
     def run(self, ask: dict, on_event) -> tuple[dict, dict]:
-        """Play the race. Returns (sealed record, private half). Raises Refused before any spending."""
+        """Play the race (or the batch). Returns (sealed record, private half). Raises Refused before any spending."""
         ask = self.check(ask)
+        runs = ask["runs"]
+        cap = self.cap_for(runs)
         if not self.busy.acquire(blocking=False):
             raise Refused(409, "Another race is running. Try again in a minute.")
         try:
             suite = self.suite_for(ask)
             sides = {"A": providers.parse(ask["a"])[0], "B": providers.parse(ask["b"])[0]}
-            self.ledger.hold(self.max_usd, ask["who"], tuple(sides.values()))
+            self.ledger.hold(cap, ask["who"], tuple(sides.values()))
         except BaseException:
             self.busy.release()
             raise
-        spent = self.max_usd  # if the match dies we cannot know what it cost: count the whole cap
+        spent = cap  # if the match dies we cannot know what it cost: count the whole cap
         spent_by = None
         try:
             run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
-            body, operator = runner.run_match(suite, ask["a"], ask["b"], self.max_usd, repeats=1, on_event=on_event)
+            body, operator = runner.run_match(
+                suite,
+                ask["a"],
+                ask["b"],
+                cap,
+                repeats=runs,
+                on_event=on_event,
+                parallel=self.batch_parallel if runs > 1 else 1,
+            )
             body["run_id"] = run_id
             body["live"] = True  # a race started from the live view, not part of a calibrated suite run
             body["verdict"] = components.verdict(body)
@@ -393,10 +498,13 @@ class Races:
                 (folder / "operator.json").write_text(
                     json.dumps(operator, indent=1, ensure_ascii=False, default=str), encoding="utf-8"
                 )
-            self.results.append(summary(sealed))
+            if runs > 1:
+                self.batches.append(batch_summary(sealed))
+            else:
+                self.results.append(summary(sealed))
             return sealed, operator
         finally:
-            self.ledger.settle(self.max_usd, spent, tuple(sides.values()), spent_by)
+            self.ledger.settle(cap, spent, tuple(sides.values()), spent_by)
             self.busy.release()
 
 
@@ -499,9 +607,20 @@ def handler_for(races: Races):
                     return False  # the viewer left; the match still finishes and is still counted
 
             listening, event = True, first
+            batch = (ask.get("runs") or 1) > 1  # a batch streams its attempts, not every step of each
+            quiet_since = time.time()
             while event is not None:
-                if listening:
+                if listening and not (batch and event["event"] == "step"):
                     listening = send(event["event"], event)
+                    quiet_since = time.time()
+                elif listening and time.time() - quiet_since > HEARTBEAT_S:
+                    # steps are happening but a batch does not send them: still keep the stream from going silent
+                    try:
+                        self.wfile.write(b": still running\n\n")
+                        self.wfile.flush()
+                    except OSError:
+                        listening = False
+                    quiet_since = time.time()
                 while True:
                     try:
                         event = events.get(timeout=HEARTBEAT_S)
@@ -515,6 +634,8 @@ def handler_for(races: Races):
                                 listening = False
             if "error" in result:
                 send("failed", {"error": result["error"]})
+            elif "sealed" in result and batch:  # the facts of the batch; its sealed record stays on the runner
+                send("batch", {"batch": batch_summary(result["sealed"])})
             elif "sealed" in result:
                 send("record", {"record": result["sealed"], "operator": result["operator"]})
 

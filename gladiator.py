@@ -146,7 +146,16 @@ def cmd_serve(args):
     state = Path(args.state)
     ledger = serve.Ledger(state / "race_ledger.json", total, args.runs_per_code, budgets, limits)
     races = serve.Races(
-        args.suite, models, ledger, args.max_usd, codes, set(args.origin or []), runs_dir=state / "runs"
+        args.suite,
+        models,
+        ledger,
+        args.max_usd,
+        codes,
+        set(args.origin or []),
+        runs_dir=state / "runs",
+        batch_sizes=tuple(int(n) for n in (args.batch_sizes or "").split(",") if n.strip()),
+        batch_usd_per_run=args.batch_usd_per_run,
+        batch_parallel=args.batch_parallel,
     )
     server = serve.serve(races, args.host, args.port)
     who = f"{len(codes)} invite(s)" if codes else "no invites: this machine only"
@@ -616,6 +625,18 @@ def main(argv=None):
         "provider can cover one more race",
     )
     sv.add_argument("--runs-per-code", type=int, default=10, help="live races one invite may start")
+    sv.add_argument(
+        "--batch-sizes",
+        default="",
+        help="batch sizes on offer, e.g. 10,25: one test played that many times in one go (default: no batches)",
+    )
+    sv.add_argument(
+        "--batch-usd-per-run",
+        type=float,
+        default=0.06,
+        help="a batch's hard cap is this much times its runs (default 0.06, half per model)",
+    )
+    sv.add_argument("--batch-parallel", type=int, default=5, help="attempts each side of a batch plays at once")
     sv.add_argument(
         "--origin", action="append", help="a web origin allowed to call this server from a browser (repeatable)"
     )
