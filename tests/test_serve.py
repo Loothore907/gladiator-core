@@ -236,7 +236,7 @@ class HttpTests(unittest.TestCase):
                 self.post({**ask, **bad})
             self.assertEqual(refused.exception.code, 400, bad)
         with mock.patch("builtins.print"):
-            text = self.post({**ask, "runs": 4}).read().decode()
+            text = self.post({**ask, "runs": 4, "early_stop": False}).read().decode()
             same = self.post({**ask, "b": MODELS[0], "runs": 4}).read().decode()
 
         def events(stream):
@@ -288,6 +288,22 @@ class HttpTests(unittest.TestCase):
         again = make(self.tmp.name, codes={"judge-1"})
         key = lambda b: b["run_id"]  # noqa: E731  (two batches filed in the same second have no order of their own)
         self.assertEqual(sorted(again.races_run()["batches"], key=key), sorted(listed["batches"], key=key))
+        # Early stop (on unless turned off): the silent player cannot pass 80% of 4 after its first failure, so no
+        # further scenario starts on either side; the ones never played are recorded as not run, with the reason.
+        with mock.patch("builtins.print"):
+            cut = events(self.post({**ask, "runs": 4}).read().decode())
+        short = cut[-1][1]["batch"]
+        self.assertEqual(short["early_stop"]["model"], MODELS[1])
+        self.assertEqual(
+            (short["early_stop"]["side"], short["early_stop"]["runs"], short["early_stop"]["pass_rate"]), ("B", 4, 0.8)
+        )
+        self.assertGreaterEqual(short["b_not_run"], 1)  # three play at once here, so the fourth never starts
+        self.assertLess(short["pairs"], 4)
+        self.assertEqual(sum(1 for k, e in cut if k == "attempt_end"), 8)  # the unplayed ones are said aloud too
+        self.assertTrue(any(k == "attempt_end" and "stopped early" in (e.get("error") or "") for k, e in cut))
+        filed = json.loads((Path(self.tmp.name) / "runs" / short["run_id"] / "record.json").read_text())
+        self.assertIn("stopped early", filed["body"]["contestants"]["B"]["results"][-1]["error"])
+        self.assertIsNone(batch["early_stop"])  # the first batch asked for every scenario and got them
         # a server with no sizes offers no batches at all
         with self.assertRaises(serve.Refused):
             make(self.tmp.name, codes={"judge-1"}, batch_sizes=()).check({**ask, "runs": 4})
