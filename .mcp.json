@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gladiator": {
+      "command": "uv",
+      "args": ["run", "gladiator", "mcp"]
+    }
+  }
+}

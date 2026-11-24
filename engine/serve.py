@@ -67,7 +67,6 @@ PAGES = Path(__file__).resolve().parent / "pages"  # the build page's three stat
 JOB_MINUTES = 20  # how long a created test waits to be downloaded
 MAX_JOBS = 20
 MAX_DESCRIPTION = 1200
-RESERVED_OWNERS = {"gladiator"}  # the library's own namespace
 
 
 def who_of(code: str) -> str:
@@ -711,12 +710,7 @@ class Forks:
         values = ask.get("values")
         if not isinstance(values, dict):
             raise Refused(400, "Send the values as an object.")
-        problems = {}
-        for name, raw in values.items():
-            given = talk.answer(str(name), raw)
-            if not given["ok"]:
-                problems[str(name)] = given["problem"].split(": ", 1)[-1]
-        return talk, problems
+        return talk, talk.fill(values)
 
     def review(self, ask: dict) -> dict:
         talk, problems = self._settle(ask)
@@ -742,7 +736,7 @@ class Forks:
         owner, name = session.slug(ask.get("owner") or "")[:40], session.slug(ask.get("name") or "")[:40]
         if not owner or not name:
             raise Refused(400, "Give the test a name, and your name or team: each needs a letter or a digit.")
-        if owner in RESERVED_OWNERS:
+        if owner in session.RESERVED_OWNERS:
             raise Refused(400, f'"{owner}" is the library\'s own name. Use your own name or team.')
         if not self.races.busy.acquire(blocking=False):
             raise Refused(409, "The runner is busy with a race or another test being checked. Try again in a minute.")

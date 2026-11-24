@@ -25,6 +25,7 @@ from engine.budget import Budget, BudgetExhausted, call_cost, next_input_tokens,
 from providers.base import FatalProviderError, ProviderError, Settings, ToolSpec
 
 MAX_CANDIDATES = 5  # how many matched tests a reader is shown
+RESERVED_OWNERS = {"gladiator"}  # the library's own namespace: a person's test is filed under their own name
 MAX_NOT_COVERED = 5
 
 PICK_RULES = """\
@@ -112,15 +113,10 @@ class ModelReader:
         bp = blueprint.load(ref, root) if ref else None
         if not bp:
             return out
-        properties = {"not_covered": {"type": "array", "items": {"type": "string"}}}
-        for c in blueprint.choices(bp):
-            if c["type"] == "whole_number":
-                properties[c["name"]] = {"type": "integer", "description": c["ask"]}
-                for bound, key in (("min", "minimum"), ("max", "maximum")):
-                    if bound in c:
-                        properties[c["name"]][key] = c[bound]
-            else:
-                properties[c["name"]] = {"type": "string", "description": f"{c['ask']} One lowercase word."}
+        properties = {
+            "not_covered": {"type": "array", "items": {"type": "string"}},
+            **blueprint.values_schema(bp)["properties"],
+        }
         fill = ToolSpec(
             "fill_choices",
             "Give the values the description states for this test's open choices, and what it cannot express.",
@@ -229,7 +225,7 @@ class ForkSession:
 
     def answer(self, name: str, raw) -> dict:
         """An empty answer keeps the value shown."""
-        if raw is None or not str(raw).strip():
+        if name in self.values and (raw is None or not str(raw).strip()):
             return {"ok": True, "problem": None, "value": self.values[name]}
         value, problem = blueprint.check_one(self.bp, name, raw)
         if problem:
@@ -237,6 +233,16 @@ class ForkSession:
         self.values[name] = value
         self.sources[name] = "you" if value != self.bp["variables"][name]["default"] else None
         return {"ok": True, "problem": None, "value": value}
+
+    def fill(self, values: dict) -> dict:
+        """Several answers at once, as a page or an assistant sends them: {choice: what is wrong with its value},
+        empty when every value was taken. A choice left out keeps the value it has."""
+        problems = {}
+        for name, raw in values.items():
+            given = self.answer(str(name), raw)
+            if not given["ok"]:
+                problems[str(name)] = given["problem"].split(": ", 1)[-1]
+        return problems
 
     def review(self) -> dict:
         broken = blueprint.broken_rules(self.bp, self.values)
@@ -252,5 +258,14 @@ class ForkSession:
             "rules": " ".join(rules.split()),
         }
 
-    def create(self, new_id: str, name: str | None = None, only_levels: list[str] | None = None) -> dict:
-        return blueprint.fork(self.pkg, self.bp, new_id, None, self.values, self.root, only_levels, name=name)
+    def create(
+        self,
+        new_id: str,
+        name: str | None = None,
+        only_levels: list[str] | None = None,
+        version: str | None = None,
+        on_level=None,
+    ) -> dict:
+        return blueprint.fork(
+            self.pkg, self.bp, new_id, version, self.values, self.root, only_levels, name=name, on_level=on_level
+        )
