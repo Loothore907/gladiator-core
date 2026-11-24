@@ -319,13 +319,19 @@ def run_contestant(
     salt: int = 0,
     on_event=None,
     parallel: int = 1,
+    halt: dict | None = None,
+    after_attempt=None,
 ):
     """Play every node `repeats` times (a fresh session each time). Results are node-major:
     node1 attempt1..N, node2 attempt1..N, ... so both contestants' lists line up pair by pair.
 
     `parallel`: how many attempts of a node this contestant plays at once (default 1: one after another). The
     attempts are independent sessions on independent worlds, so playing several at once changes how long a batch
-    takes, not what is played; results keep their order, and the one budget still stops every call it must."""
+    takes, not what is played; results keep their order, and the one budget still stops every call it must.
+
+    `after_attempt(side, result)` is asked after each attempt that was played; if it returns a reason, that
+    reason goes into `halt` (shared by both contestants) and no further attempt starts on either side. Attempts
+    already under way finish. The ones never started are recorded as not run, with the reason."""
     provider = providers.create(contestant)
     price = price_for(*providers.parse(contestant))
     results, operator = [], []
@@ -335,9 +341,11 @@ def run_contestant(
         """One attempt: (public result, private half or None)."""
         if state["dead"]:
             return not_run(node, state["dead"], attempt), None
-        if budget.refused:
-            return not_run(node, "budget cap reached", attempt), None
         emit = emitter(on_event, side=side, model=contestant, node=node["id"], attempt=attempt)
+        skip = (halt or {}).get("why") or ("budget cap reached" if budget.refused else None)
+        if skip:  # said aloud, so a viewer sees the attempt was not played rather than still waiting
+            emit("attempt_end", passed=False, termination="not_run", error=skip)
+            return not_run(node, skip, attempt), None
         emit("attempt_start", name=node["name"], challenge=node["provenance"])
         try:
             instance = instance_for(salt, node, attempt, suite, overrides)
@@ -372,6 +380,10 @@ def run_contestant(
             wall_s=public["wall_s"],
             grade_details=public["grade_details"],  # the public half only, as the record will hold it
         )
+        if after_attempt is not None and halt is not None:
+            why = after_attempt(side, public)
+            if why and not halt.get("why"):
+                halt["why"] = why
         verdict = "PASS" if public["passed"] else "fail"
         label = node["name"] + (f" #{attempt}" if repeats > 1 else "")
         say(
@@ -407,6 +419,7 @@ def run_match(
     side_overrides: dict | None = None,
     on_event=None,
     parallel: int = 1,
+    after_attempt=None,
 ):
     """on_event: optional callback given one dict per event while the match runs (match_start, attempt_start,
     step, attempt_end, match_end), for a live view. It sees only public facts and cannot affect the match.
@@ -442,12 +455,35 @@ def run_match(
         repeats=repeats,
         cap_usd=max_usd,
     )
+    halt: dict = {"why": None}  # one for both contestants: a reason to start no further attempt
     with ThreadPoolExecutor(max_workers=2) as pool:
         fa = pool.submit(
-            run_contestant, "A", contestant_a, suite, budgets["A"], per_side["A"], repeats, salt, on_event, parallel
+            run_contestant,
+            "A",
+            contestant_a,
+            suite,
+            budgets["A"],
+            per_side["A"],
+            repeats,
+            salt,
+            on_event,
+            parallel,
+            halt,
+            after_attempt,
         )
         fb = pool.submit(
-            run_contestant, "B", contestant_b, suite, budgets["B"], per_side["B"], repeats, salt, on_event, parallel
+            run_contestant,
+            "B",
+            contestant_b,
+            suite,
+            budgets["B"],
+            per_side["B"],
+            repeats,
+            salt,
+            on_event,
+            parallel,
+            halt,
+            after_attempt,
         )
         results_a, operator_a = fa.result()
         results_b, operator_b = fb.result()

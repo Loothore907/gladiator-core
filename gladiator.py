@@ -156,6 +156,7 @@ def cmd_serve(args):
         batch_sizes=tuple(int(n) for n in (args.batch_sizes or "").split(",") if n.strip()),
         batch_usd_per_run=args.batch_usd_per_run,
         batch_parallel=args.batch_parallel,
+        batch_pass_rate=args.batch_pass_rate,
     )
     reader = args.reader
     if reader:  # the model that reads a signed-in visitor's description on the build page
@@ -656,6 +657,12 @@ def main(argv=None):
         help="a batch's hard cap is this much times its runs (default 0.06, half per model)",
     )
     sv.add_argument("--batch-parallel", type=int, default=5, help="attempts each side of a batch plays at once")
+    sv.add_argument(
+        "--batch-pass-rate",
+        type=float,
+        default=0.8,
+        help="a batch stops early once a model can no longer pass this share of its scenarios (default 0.8)",
+    )
     sv.add_argument(
         "--origin", action="append", help="a web origin allowed to call this server from a browser (repeatable)"
     )

@@ -44,6 +44,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import queue
 import secrets
 import tempfile
@@ -168,6 +169,7 @@ def batch_summary(sealed: dict) -> dict:
     out["ties"] = sum(1 for x in judged if x["winner"] == "tie")
     out["same_result"] = sum(1 for x in judged if x["a_passed"] == x["b_passed"])  # both passed, or both did not
     out["p_value"] = sign_test(out["a_wins"], out["b_wins"])
+    out["early_stop"] = body.get("early_stop")  # why the batch ended before its last scenario, if it did
     return out
 
 
@@ -332,7 +334,11 @@ class Races:
         batch_sizes: tuple[int, ...] = (),
         batch_usd_per_run: float = 0.06,
         batch_parallel: int = 5,
+        batch_pass_rate: float = 0.8,
     ):
+        # Early stop: a batch ends once a model has failed so often that it can no longer pass this share of the
+        # scenarios asked for. The question is answered, and the rest of the money is not spent.
+        self.batch_pass_rate = float(batch_pass_rate)
         # Batches: one test played `runs` times in one go (two models, or one model on both sides to see how
         # steadily it does the job). Off unless sizes are given. A batch's cap is `batch_usd_per_run` x runs.
         self.batch_sizes = tuple(sorted({int(n) for n in batch_sizes if int(n) > 1}))
@@ -446,6 +452,7 @@ class Races:
             "cap_usd_per_race": self.max_usd,
             # batches on offer: how many runs, and the cap of each size
             "batches": [{"runs": n, "cap_usd": self.cap_for(n)} for n in self.batch_sizes],
+            "batch_pass_rate": self.batch_pass_rate,
             "needs_code": self.codes is not None,
         }
 
@@ -490,7 +497,17 @@ class Races:
         profile = ask.get("profile") or "budget"
         if profile not in PROFILES:
             raise Refused(400, f"Profile must be one of: {', '.join(sorted(PROFILES))}.")
-        return {"task": task, "a": a, "b": b, "difficulty": level, "profile": profile, "who": who, "runs": runs}
+        early = ask.get("early_stop", True) is not False  # on unless the request turns it off
+        return {
+            "task": task,
+            "a": a,
+            "b": b,
+            "difficulty": level,
+            "profile": profile,
+            "who": who,
+            "runs": runs,
+            "early_stop": early and runs > 1,
+        }
 
     def suite_for(self, ask: dict) -> dict:
         """The one-scenario suite a race plays: the base suite's settings and locked challenge, configured."""
@@ -528,6 +545,30 @@ class Races:
         spent_by = None
         try:
             run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
+            stopped: dict = {}
+            failed = {"A": 0, "B": 0}
+            counting = threading.Lock()
+            need = math.ceil(self.batch_pass_rate * runs - 1e-9)  # passes a model needs out of `runs`
+
+            def after(side: str, result: dict) -> str | None:
+                if result.get("passed") or result.get("termination") in components.NOT_COMPARABLE:
+                    return None
+                with counting:
+                    failed[side] += 1
+                    if failed[side] <= runs - need or stopped:
+                        return None
+                    stopped.update(
+                        side=side,
+                        model=ask[side.lower()],
+                        failed=failed[side],
+                        runs=runs,
+                        pass_rate=self.batch_pass_rate,
+                    )
+                return (
+                    f"stopped early: {ask[side.lower()]} did not pass {failed[side]} of {runs}, "
+                    f"so it could no longer pass {self.batch_pass_rate:.0%}"
+                )
+
             body, operator = runner.run_match(
                 suite,
                 ask["a"],
@@ -536,7 +577,10 @@ class Races:
                 repeats=runs,
                 on_event=on_event,
                 parallel=self.batch_parallel if runs > 1 else 1,
+                after_attempt=after if ask["early_stop"] else None,
             )
+            if stopped:
+                body["early_stop"] = dict(stopped)
             body["run_id"] = run_id
             body["live"] = True  # a race started from the live view, not part of a calibrated suite run
             body["verdict"] = components.verdict(body)
