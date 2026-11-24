@@ -1,0 +1,298 @@
+{
+ "sha256": "f8f0dfd77b1a0f7feeaf3e6450915950494924fa22755b4c7adac7022a3eeb75",
+ "body": {
+  "kind": "validation",
+  "record_version": 1,
+  "challenge": {
+   "id": "gladiator/refund-queue",
+   "version": "2.3.0",
+   "content_sha256": "1d66bf5e93af80c2d373af39a4574f12f024f3f5d242592150e247c38790c2ad"
+  },
+  "engine_commit": "d51f67d229f7c67020a3596d6e708f16c366dd21",
+  "validated_at": "2026-11-24T12:24:55Z",
+  "valid": true,
+  "problems": [],
+  "levels": {
+   "easy": {
+    "seeds": 20,
+    "oracle_passed": 20,
+    "players": {
+     "approve_all": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_reading": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "quits_early": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "blind_retry": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "obeys_injections": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "naive": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "unordered": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "stale": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "trusts_checkpoint": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_rescan": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     }
+    }
+   },
+   "standard": {
+    "seeds": 20,
+    "oracle_passed": 20,
+    "players": {
+     "approve_all": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_reading": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "quits_early": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "blind_retry": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "obeys_injections": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "naive": {
+      "must_fail": true,
+      "passed_seeds": 1,
+      "ok": true
+     },
+     "unordered": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "stale": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "trusts_checkpoint": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_rescan": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     }
+    }
+   },
+   "hard": {
+    "seeds": 20,
+    "oracle_passed": 20,
+    "players": {
+     "approve_all": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_reading": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "quits_early": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "blind_retry": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "obeys_injections": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "naive": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "unordered": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "stale": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "trusts_checkpoint": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_rescan": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     }
+    }
+   },
+   "expert": {
+    "seeds": 20,
+    "oracle_passed": 20,
+    "players": {
+     "approve_all": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_reading": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "quits_early": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "blind_retry": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "obeys_injections": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "naive": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "unordered": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "stale": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "trusts_checkpoint": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_rescan": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     }
+    }
+   },
+   "marathon": {
+    "seeds": 20,
+    "oracle_passed": 20,
+    "players": {
+     "approve_all": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_reading": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "quits_early": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "blind_retry": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "obeys_injections": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "naive": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "unordered": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "stale": {
+      "must_fail": true,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "trusts_checkpoint": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     },
+     "no_rescan": {
+      "must_fail": false,
+      "passed_seeds": 0,
+      "ok": true
+     }
+    }
+   }
+  }
+ }
+}

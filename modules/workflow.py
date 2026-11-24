@@ -358,6 +358,7 @@ class Workflow(Module):
         # Re-roll (deterministically) until the world has the mix of outcomes the author requires, so every
         # hazard actually gets exercised (e.g. a refund-timeout fault needs refunds to happen at all).
         minimum = {k: int(_level(v, difficulty)) for k, v in (spec["task"].get("min_each") or {}).items()}
+        self._first_read_plan = []  # announced changes planned for a first read (hazards.changes, when: first_read)
         for attempt in range(100):
             self.rng = random.Random(f"{self.seed}:{difficulty}:{attempt}")
             self.world = self._generate()
@@ -365,10 +366,14 @@ class Workflow(Module):
             counts = dict.fromkeys(self.outcome_names, 0)
             for v in self.expected.values():
                 counts[v] += 1
-            if all(counts[k] >= n for k, n in minimum.items()):
+            if all(counts[k] >= n for k, n in minimum.items()) and self._place_first_read_changes():
                 break
         else:
-            raise ValueError(f"could not generate a world with {minimum} in 100 tries; loosen min_each")
+            raise ValueError(
+                f"could not generate a world with {minimum} in 100 tries"
+                + (" in which an announced change matters" if self._first_read_specs() else "")
+                + "; loosen min_each"
+            )
         self.resume_keys = self._plan_resume()  # items handled before the agent arrived (hazards.resume)
         self._plan_faults()
         self.world0 = copy.deepcopy(self.world)  # the world before any announced change (for grading by epoch)
@@ -576,7 +581,7 @@ class Workflow(Module):
             self.spec["hazards"].get("changes", []), key=lambda c: int(_level(c.get("at_action", 0), self.difficulty))
         ):
             at = int(_level(c.get("at_action", 0), self.difficulty))
-            if not at:
+            if not at or c.get("when") == "first_read":
                 continue
             if c.get("insert"):  # new rows for the table (generated like the rest of it), appended at the end
                 n = int(_level(c["insert"], self.difficulty))
@@ -696,17 +701,118 @@ class Workflow(Module):
             if not task.get("resources"):
                 self._apply_change(base, self.change_plan[-1])
                 base_truth = self._truth(base)
+        self.change_plan += self._first_read_plan  # placed with the world (see _place_first_read_changes)
         self.change_plan.sort(key=lambda ch: ch["at"])
         key = task["target_key"]
         for epoch, ch in enumerate(self.change_plan, start=1):  # the epoch each inserted item first exists in
             for row in ch.get("insert") or []:
                 self._born[row[key]] = epoch
 
-    def _change_values(self, c, row) -> dict:
+    def _first_read_specs(self) -> list[dict]:
+        """The `when: first_read` changes switched on at this level, in the order they are meant to arrive."""
+        on = [
+            c
+            for c in self.spec["hazards"].get("changes", [])
+            if c.get("when") == "first_read" and int(_level(c.get("at_action", 0), self.difficulty))
+        ]
+        return sorted(on, key=lambda c: int(_level(c["at_action"], self.difficulty)))
+
+    def _place_first_read_changes(self) -> bool:
+        """Plan the changes that are announced when the agent first looks a record up (`when: first_read`).
+
+        A change planned for a fixed action count can miss: the agent may not have read the record yet (it then
+        reads the new value and nothing was at stake) or may already have decided everything that depends on it.
+        A first-read change cannot miss. It is announced in the result of the agent's own first lookup of the
+        record, which still shows the old values, and the record is one whose change overturns at least one item
+        that depends on it. Whichever of those items the agent handles first, a decision is still ahead that is
+        wrong unless the notice is acted on. `at_action` switches the change on per level (0 = off) and says
+        roughly where in the queue it should fall: among the records that qualify, the one whose first dependent
+        item sits nearest that point is taken.
+
+        A change with no such record in a world is simply not made there (announcing a change that cannot
+        matter is what this avoids). Returns False when no change at all could be placed, so the world is
+        generated again: every world has at least one. Uses its own random stream: worlds of challenges without
+        first-read changes are untouched."""
+        self._first_read_plan = []
+        specs = self._first_read_specs()
+        if not specs:
+            return True
+        task = self.spec["task"]
+        timed = [
+            c
+            for c in self.spec["hazards"]["changes"]
+            if c.get("when") != "first_read" and int(_level(c.get("at_action", 0), self.difficulty))
+        ]
+        if task.get("resources") or timed:
+            raise ValueError("`when: first_read` changes cannot yet be mixed with task.resources or timed changes")
+        rng = random.Random(f"{self.seed}:{self.difficulty}:first_read")
+        targets = self.world[task["decide_each"]]
+        per_item = 2 + len(joins_of(task))
+        truth, truth_args = self.expected, getattr(self, "expected_args", {})
+        taken = set()  # items a planned change already overturns or depends on: one change per item
+        for c in specs:
+            at = int(_level(c["at_action"], self.difficulty))
+            rows = self.world[c["table"]]
+            dependents: dict = {}  # record key -> positions in the queue of the items that depend on it
+            for i, t in enumerate(targets):
+                dependents.setdefault(self._ref(t, c["referenced_by"]), []).append(i)
+            options = []
+            for index, row in enumerate(rows):
+                items = dependents.get(row[c["key"]], [])
+                keys = {targets[i][task["target_key"]] for i in items}
+                if not items or keys & (taken | self.injected_targets):
+                    continue  # nothing depends on it, or it would touch a planted instruction or another change
+                if c.get("where") and not evaluate(c["where"], {"row": row}):
+                    continue
+                values = self._change_values(c, row, rng)
+                after = copy.deepcopy(self.world)
+                after[c["table"]][index].update(values)
+                new, new_args = self._truth(after)
+                if any(new[k] != truth[k] or new_args.get(k, {}) != truth_args.get(k, {}) for k in keys):
+                    options.append((abs(items[0] - at // per_item), index, values, keys))
+            if not options:
+                continue  # no record whose change would matter here: this change is not made in this world
+            nearest = min(o[0] for o in options)
+            _, index, values, keys = rng.choice([o for o in options if o[0] == nearest])
+            taken |= keys
+            self._first_read_plan.append(
+                {
+                    "at": at,
+                    "on_read": [c["table"], str(rows[index][c["key"]])],
+                    "touches": sorted(keys),  # the items that depend on the record (their outcome may change)
+                    "table": c["table"],
+                    "index": index,
+                    "set": values,
+                    "add": {},
+                    "notice": c["notice"],
+                }
+            )
+        if not self._first_read_plan:
+            return False  # a world needs at least one
+        # Every planned fault must be certain to fire: a tool has to be needed, by items no change can touch, at
+        # least as often as it is planned to fail (see _plan_faults).
+        for f in self.spec["hazards"].get("faults", []):
+            times = int(_level(f.get("times", 0), self.difficulty))
+            if times and self._sure_calls(f["tool"]) < times:
+                return False
+        return True
+
+    def _sure_calls(self, tool_name: str) -> int:
+        """How many calls of a tool the job needs whatever the announced changes do: items whose outcome uses the
+        tool and that depend on no record a first-read change touches."""
+        tool = next(t for t in self.spec["tools"] if t["name"] == tool_name)
+        outcome = (
+            self.tool_outcome.get(tool["name"]) if self.multi else {"create": "approve", "update": "deny"}[tool["op"]]
+        )
+        touched = {k for ch in self._first_read_plan for k in ch["touches"]}
+        done_before = getattr(self, "resume_keys", set())
+        return sum(v == outcome for k, v in self.expected.items() if k not in touched and k not in done_before)
+
+    def _change_values(self, c, row, rng=None) -> dict:
         values = {}
         for field, gen in (c.get("set") or {}).items():
             for _ in range(10):  # a change must change something
-                values[field] = _gen_value(gen, 0, self.rng, self.world, self.difficulty)
+                values[field] = _gen_value(gen, 0, rng or self.rng, self.world, self.difficulty)
                 if values[field] != row.get(field):
                     break
         return values
@@ -840,10 +946,15 @@ class Workflow(Module):
                 calls = sum(v == outcome for v in todo.values())
             else:
                 calls = needed.get(tool["op"], 0)
-            if times and calls:
+            if times and calls and self._first_read_plan:
+                # First-read changes always overturn something, so only calls for items no change can touch are
+                # certain to happen: the faults go among those (there are enough: _place_first_read_changes).
+                calls = span = self._sure_calls(f["tool"])
+            elif times and calls:
                 # With announced changes, later calls of a tool may never happen (an item's outcome can change), so
                 # faults go in the first half of the calls the job needs, which happen either way.
                 span = max(times, -(-calls // 2)) if self.spec["hazards"].get("changes") else calls
+            if times and calls:
                 span = min(span, calls)
                 off = self.fault_offset if tool["op"] == "create" else 0
                 span = max(1, min(span, calls - off)) if off < calls else span
@@ -910,11 +1021,7 @@ class Workflow(Module):
         result = self._dispatch(tool, args)
         self.log.append({"tool": tool_name, "args": args, "result": result})
         notices = []
-        while (
-            not self.done  # nothing changes once the agent has finished
-            and self.epoch < len(self.change_plan)
-            and self.change_plan[self.epoch]["at"] <= len(self.log)
-        ):
+        while not self.done and self._next_change_is_due():  # nothing changes once the agent has finished
             change = self.change_plan[self.epoch]
             self.change_marks.append(set(self.decided_at))
             row = self._apply_change(self.world, change)
@@ -924,6 +1031,23 @@ class Workflow(Module):
             result = {**result, "notices": notices}
             self.log[-1]["result"] = result
         return result
+
+    def _next_change_is_due(self) -> bool:
+        """Is an announced change due after the call just made? A timed change is due once `at` calls have been
+        made, in plan order. A first-read change is due once its record has been looked up, whatever the order:
+        it is moved to the front of what is still to come, so `change_plan[:epoch]` stays "the changes announced
+        so far, in the order they were announced", which is what grading by the facts at the time relies on."""
+        pending = self.change_plan[self.epoch :]
+        if not pending:
+            return False
+        for i, change in enumerate(pending):
+            if change.get("on_read"):
+                if tuple(change["on_read"]) in {(table, str(key)) for table, key in self.reads}:
+                    self.change_plan.insert(self.epoch, self.change_plan.pop(self.epoch + i))
+                    return True
+            elif i == 0:
+                return change["at"] <= len(self.log)
+        return False
 
     # ---------- tool operations
 
