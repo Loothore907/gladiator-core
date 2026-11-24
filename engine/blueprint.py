@@ -81,6 +81,22 @@ def choices(bp: dict) -> list[dict]:
     return [{"name": name, **{k: v[k] for k in keep if k in v}} for name, v in bp["variables"].items()]
 
 
+def values_schema(bp: dict) -> dict:
+    """The declared choices as a JSON Schema for a `values` object: what a model, or any program, may send. Every
+    choice is optional (one left out keeps the test's own value) and nothing else is accepted. The engine checks
+    each value again (`check_one`): a schema describes, it does not decide."""
+    properties = {}
+    for c in choices(bp):
+        if c["type"] == "whole_number":
+            properties[c["name"]] = {"type": "integer", "description": c["ask"]}
+            for bound, key in (("min", "minimum"), ("max", "maximum")):
+                if bound in c:
+                    properties[c["name"]][key] = c[bound]
+        else:
+            properties[c["name"]] = {"type": "string", "description": f"{c['ask']} One lowercase word."}
+    return {"type": "object", "properties": properties, "additionalProperties": False}
+
+
 def _whole_number(raw, unit: str = ""):
     """A whole number from what a person or a model gave: 30, "30", "10,000", "$250" or "30 days" (the choice's
     own unit). Anything else is None."""

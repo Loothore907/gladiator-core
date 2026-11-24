@@ -187,6 +187,14 @@ def cmd_serve(args):
         print("Stopped.")
 
 
+def cmd_mcp(args):
+    """Serve the test builder to an AI assistant over MCP (stdio). Standard output belongs to the protocol from
+    here on, so nothing else may print to it."""
+    from engine import assistant
+
+    assistant.serve()
+
+
 def cmd_verify(args):
     problems = record.verify(Path(args.run_dir))
     if problems:
@@ -711,6 +719,10 @@ def main(argv=None):
     ct.add_argument("--max-usd", type=float, default=0.05, help="most the reading may cost in USD (default 0.05)")
     ct.add_argument("--owner", help="your name or team, for the new test's id (asked if not given)")
     ct.set_defaults(func=cmd_chat)
+
+    sub.add_parser(
+        "mcp", help="let an AI assistant build a test for your own flow (an MCP server on stdio; needs no key)"
+    ).set_defaults(func=cmd_mcp)
 
     ch = sub.add_parser("choices", help="what a test lets you change when you fork it")
     ch.add_argument("challenge", help="namespace/name@version")

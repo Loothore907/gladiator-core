@@ -129,6 +129,11 @@ Dockerfile            the Linux container
   record and a suite file as one download; nothing is added to the library. On a hosted runner, creating is for
   signed-in visitors unless the runner is started with `--open-create`; anyone else is shown the exact
   `gladiator fork` command for their choices.
+- **With an AI assistant leading:** `uv run gladiator mcp` is an MCP server (it runs on your machine, calls no
+  model and needs no key). Your assistant reads what a library test needs (every open choice with its range, the
+  rules between choices, what the test cannot express), collects your values in whatever way suits you, checks
+  the design and has the engine create the test. The same rules hold: declared choices only, and nothing is
+  written unless validation passes. How to connect it: `docs/ASSISTANT.md`.
 - `uv run gladiator validate <namespace/name@version>` checks a `workflow@1` challenge automatically: an
   oracle player must pass it and a set of deliberately bad players must fail it, at every difficulty.
 - A **test type** is the engine code that runs a kind of challenge (`modules/`, registered in
