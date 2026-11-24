@@ -206,6 +206,10 @@ class HttpTests(unittest.TestCase):
         self.assertEqual((one["a"], one["b"]), (MODELS[0], MODELS[1]))
         self.assertEqual(one["winner"], {"A": MODELS[0], "B": MODELS[1]}.get(body["verdict"]["winner"]))
         self.assertEqual(one["a_passed"], body["contestants"]["A"]["results"][0]["passed"])
+        # each side's grade comes with it, so a page can write the race up: counts, and which items went wrong
+        self.assertEqual(one["a_details"], body["contestants"]["A"]["results"][0]["grade_details"])
+        self.assertTrue(one["a_details"])
+        self.assertEqual(one["b_termination"], body["contestants"]["B"]["results"][0]["termination"])
         self.assertNotIn("operator", json.dumps(one))
         again = make(self.tmp.name, codes={"judge-1"})
         self.assertEqual(again.races_run()["races"], listed)

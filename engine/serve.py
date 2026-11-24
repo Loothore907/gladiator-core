@@ -68,6 +68,14 @@ def summary(sealed: dict) -> dict:
         "b_passed": bool(first["B"].get("passed")),
         "a_cost_usd": float(first["A"].get("cost_usd") or 0),
         "b_cost_usd": float(first["B"].get("cost_usd") or 0),
+        # what the grader found for each side (counts, and which items it decided wrongly), how each attempt
+        # ended, and how long it took: enough for a page to write the match up without the full record
+        "a_details": first["A"].get("grade_details") or {},
+        "b_details": first["B"].get("grade_details") or {},
+        "a_termination": first["A"].get("termination"),
+        "b_termination": first["B"].get("termination"),
+        "a_seconds": float(first["A"].get("wall_s") or 0),
+        "b_seconds": float(first["B"].get("wall_s") or 0),
         "difficulty": (body.get("settings") or {}).get("defaults", {}).get("difficulty"),
     }
 
