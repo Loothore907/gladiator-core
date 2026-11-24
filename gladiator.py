@@ -237,13 +237,122 @@ def cmd_fingerprint(args):
         print(f"written to {path}")
 
 
+def cmd_blueprints(args):
+    """Describe a flow in your own words and see the closest tests in the library, or list them all."""
+    from engine import blueprint, packages
+
+    words = " ".join(args.description)
+    if words:
+        found = blueprint.find(words)
+    else:
+        known = blueprint.library()
+        found = [
+            {
+                "ref": pkg.ref,
+                "name": pkg.manifest["name"],
+                "description": " ".join(str(pkg.manifest.get("description", "")).split()),
+                "status": pkg.status.get("status"),
+                "choices": len(known[pkg.ref]["variables"]) if pkg.ref in known else 0,
+            }
+            for pkg in packages.catalog().values()
+            if pkg.status.get("status") != "retired"
+        ]
+    if args.json:
+        print(json.dumps({"description": words, "matches": found}, indent=1))
+        return
+    if words and not found:
+        print(f'Nothing in the library matches "{words}". Run `gladiator blueprints` to see what exists.')
+        return
+    print(f'Closest tests to "{words}" (best first):' if words else "Tests in the library:")
+    for r in found:
+        open_ = f"{r['choices']} open choices" if r["choices"] else "no open choices declared yet"
+        on = f"   matched on: {', '.join(r['matched'])}" if r.get("matched") else ""
+        print(f"\n  {r['ref']}  ({r['name']}; {open_}){on}")
+        print(f"    {r['description'][:200]}")
+    print("\nNext: `gladiator choices <namespace/name@version>` shows what a test lets you change.")
+
+
+def cmd_choices(args):
+    """What a test lets you change when you fork it: each open choice, its default and its limits."""
+    from engine import blueprint, packages
+
+    pkg = packages.resolve(args.challenge)
+    bp = blueprint.load(pkg.ref)
+    if args.json:
+        print(
+            json.dumps({"ref": pkg.ref, "name": pkg.manifest["name"], "choices": blueprint.choices(bp) if bp else []})
+        )
+        return
+    if not bp:
+        print(f"{pkg.ref} declares no open choices yet. `gladiator fork` can still copy it for editing by hand.")
+        return
+    print(f"{pkg.ref}  ({pkg.manifest['name']}): what you can change\n")
+    for c in blueprint.choices(bp):
+        limits = f", {c['min']} to {c['max']}" if "min" in c else ""
+        print(f"  {c['name']}\n    {c['ask']}\n    now: {c['default']} {c.get('unit', '')}".rstrip() + limits)
+    for rule in bp.get("require") or []:
+        print(f"  Always: {rule['say']}")
+    print("\nEverything else (the records, tools, decisions and obstacles) stays as tested.")
+    print(f"Next: gladiator fork {pkg.ref} --to yourname/your-test --set <choice>=<value> ...")
+
+
+def fork_by_choices(args, pkg):
+    """`gladiator fork --set`: a new sealed, validated test that differs from its source only in chosen values."""
+    from engine import blueprint
+    from engine.validate import plain_problems, plain_summary
+
+    bp = blueprint.load(pkg.ref)
+    if not bp:
+        raise SystemExit(f"{pkg.ref} declares no open choices, so --set has nothing to set (see `gladiator choices`).")
+    if not args.to:
+        raise SystemExit("a fork by choices needs its own id: --to yourname/your-test")
+    given = {}
+    for item in args.set:
+        name, eq, value = item.partition("=")
+        if not eq:
+            raise SystemExit(f"--set takes choice=value, got '{item}'")
+        given[name.strip()] = value.strip()
+    print(f"Checking {args.to} against the automatic checks (free, about a minute)...", flush=True)
+    result = blueprint.fork(pkg, bp, args.to, args.version, given, name=args.name)
+    if not result["ok"]:
+        where = (
+            "Those values are not allowed"
+            if result["stage"] == "choices"
+            else "With those values the test does not pass its automatic checks"
+        )
+        print(f"NOT CREATED. {where}:")
+        for problem in plain_problems(result.get("levels") or {}) or result["problems"]:
+            print(f"  - {problem}")
+        print("Nothing was written.")
+        sys.exit(1)
+    units = {name: v.get("unit", "") for name, v in bp["variables"].items()}
+    print(f"\nCREATED {result['ref']}, forked from {result['forked_from']}\n\nYour choices")
+    moved = {c["name"] for c in result["changed"]}
+    for name, value in result["values"].items():
+        was = f"  (was {bp['variables'][name]['default']})" if name in moved else "  (unchanged)"
+        print(f"  {name}: {value} {units[name]}".rstrip() + was)
+    print("\nChecked")
+    for line in plain_summary(result["levels"]):
+        print(f"  {line}")
+    w = result["written"]
+    print(
+        f"\nWritten\n  test      {w['test']}/  (sealed, fingerprint {result['fingerprint'][:12]}, status: unreviewed)"
+    )
+    print(f"  evidence  {w['evidence']}\n  suite     {w['suite']}")
+    print("\nNext: race two models on it")
+    print(f"  python gladiator.py match --suite {w['suite']} --a <provider:model> --b <provider:model> --max-usd 1")
+
+
 def cmd_fork(args):
-    """For challenge authors: copy a challenge to a new id (a fork) or a new version, ready to edit."""
+    """For challenge authors: copy a challenge to a new id (a fork) or a new version, ready to edit. With --set:
+    fork by choices instead (no editing; the values are checked, and the result is validated and sealed)."""
     from engine import packages
 
     if not (args.to or args.version):
         raise SystemExit("say what to create: --to namespace/name (a fork) and/or --version X.Y.Z")
     pkg = packages.resolve(args.challenge)
+    if args.set:
+        return fork_by_choices(args, pkg)
     path = packages.fork(pkg, args.to, args.version)
     rel = path.relative_to(ROOT)
     print(f"created {rel} from {pkg.ref} (status: unreviewed)")
@@ -400,7 +509,26 @@ def main(argv=None):
     fk.add_argument("challenge", help="source, e.g. gladiator/refund-queue@2.1.0")
     fk.add_argument("--to", help="new id for a fork, e.g. myteam/refund-queue (forked_from is set)")
     fk.add_argument("--version", help="version of the copy, e.g. 2.2.0 (default: the source's version)")
+    fk.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="CHOICE=VALUE",
+        help="fork by choices: set one of the source's open choices (see `choices`); repeat for more. "
+        "The fork is validated and sealed, never edited by hand (default version 1.0.0)",
+    )
+    fk.add_argument("--name", help="with --set: what to call the new test (default: the source's name)")
     fk.set_defaults(func=cmd_fork)
+
+    bl = sub.add_parser("blueprints", help="describe your flow: find the closest tests in the library")
+    bl.add_argument("description", nargs="*", help="your flow in your own words (omit to list every test)")
+    bl.add_argument("--json", action="store_true", help="print the matches as JSON")
+    bl.set_defaults(func=cmd_blueprints)
+
+    ch = sub.add_parser("choices", help="what a test lets you change when you fork it")
+    ch.add_argument("challenge", help="namespace/name@version")
+    ch.add_argument("--json", action="store_true", help="print the choices as JSON")
+    ch.set_defaults(func=cmd_choices)
 
     md = sub.add_parser("models", help="ask providers which models this key can use (free)")
     md.add_argument("--provider", choices=["anthropic", "openai", "google", "openrouter"])

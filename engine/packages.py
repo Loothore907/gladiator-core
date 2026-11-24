@@ -181,14 +181,24 @@ def resolve(ref: str) -> Package:
     return pkg
 
 
-def fork(pkg: Package, new_id: str | None = None, new_version: str | None = None, root: Path = ROOT) -> Path:
+def fork(
+    pkg: Package,
+    new_id: str | None = None,
+    new_version: str | None = None,
+    root: Path = ROOT,
+    replace: dict | None = None,
+    extra: dict | None = None,
+) -> Path:
     """Copy a package to a new id and/or version, as the starting point for an edit (`gladiator fork`).
 
     Files inside the source package's folder are copied and every path to them (in `files` and `params`) is
     rewritten to the new folder; files outside it (e.g. pinned v1 simulators) stay shared, unchanged. A new id
     is a fork: `forked_from` names the source. A new version of the same id is a new version: `forked_from`
     is kept as it was. The copy is sealed with a fresh fingerprint and has no catalog entry, so it starts as
-    `unreviewed`. Returns the new manifest path."""
+    `unreviewed`. Returns the new manifest path.
+
+    A fork by choices (engine/blueprint.py) passes `replace` ({source file path: new text}, written instead of
+    copying that file) and `extra` (manifest fields to add, e.g. the choices made)."""
     m = pkg.manifest
     cid = new_id or m["id"]
     version = new_version or m["version"]
@@ -216,18 +226,27 @@ def fork(pkg: Package, new_id: str | None = None, new_version: str | None = None
         if rel.startswith(src + "/"):
             out = root / moved(rel)
             out.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(root / rel, out)
-    new = dict(m, id=cid, version=version, files=moved(m.get("files") or []))
+            if rel in (replace or {}):
+                out.write_text(replace[rel], encoding="utf-8", newline="\n")
+            else:
+                shutil.copyfile(root / rel, out)
+    new = dict(m, id=cid, version=version, files=moved(m.get("files") or []), **(extra or {}))
     if "params" in m:
         new["params"] = moved(m["params"])
     if cid != m["id"]:
         new["forked_from"] = pkg.ref
     new["content_sha256"] = fingerprint(new, root)
-    header = (
-        "# Challenge package (sealed). Do not edit after publishing: any change breaks content_sha256.\n"
-        f"# Created by `gladiator fork` from {pkg.ref}. While drafting, edit freely, then re-seal with\n"
-        "# `gladiator fingerprint --write` and check with `gladiator validate`.\n"
-    )
+    header = "# Challenge package (sealed). Do not edit after publishing: any change breaks content_sha256.\n"
+    if replace:
+        header += (
+            f"# Created by `gladiator fork` from {pkg.ref} by choosing values for its open choices (`choices` below).\n"
+            "# To change a choice, fork again with other values: nothing here is edited by hand.\n"
+        )
+    else:
+        header += (
+            f"# Created by `gladiator fork` from {pkg.ref}. While drafting, edit freely, then re-seal with\n"
+            "# `gladiator fingerprint --write` and check with `gladiator validate`.\n"
+        )
     path = target / MANIFEST
     path.write_text(header + yaml.safe_dump(new, sort_keys=False, allow_unicode=True, width=110), encoding="utf-8")
     return path
