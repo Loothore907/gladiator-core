@@ -115,6 +115,13 @@ Dockerfile            the Linux container
   the wording the model reads and the near-miss records together. Values outside the declared choices are
   refused, and nothing is written unless automatic validation passes. Structure (records, tools, decisions,
   obstacles) cannot be changed this way.
+- **`uv run gladiator chat`** walks the same path as a conversation: you describe your flow, it shows the closest
+  test and asks about each thing that test lets you change (press Enter to keep a value), shows the rules a model
+  will be told with your answers in them, and then creates the sealed, validated test. With
+  `--model <provider:model>` a model reads your description first: it says which test is the same kind of job and
+  which choices your words already settle. That is all it does. Its answers come back inside a schema built from
+  the declared choices, the engine checks them again, and you confirm every value. Reading is capped at 5 cents
+  (`--max-usd`); without `--model` the chat needs no key and costs nothing.
 - `uv run gladiator validate <namespace/name@version>` checks a `workflow@1` challenge automatically: an
   oracle player must pass it and a set of deliberately bad players must fail it, at every difficulty.
 - A **test type** is the engine code that runs a kind of challenge (`modules/`, registered in

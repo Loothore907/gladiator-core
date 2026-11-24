@@ -299,7 +299,6 @@ def cmd_choices(args):
 def fork_by_choices(args, pkg):
     """`gladiator fork --set`: a new sealed, validated test that differs from its source only in chosen values."""
     from engine import blueprint
-    from engine.validate import plain_problems, plain_summary
 
     bp = blueprint.load(pkg.ref)
     if not bp:
@@ -314,6 +313,14 @@ def fork_by_choices(args, pkg):
         given[name.strip()] = value.strip()
     print(f"Checking {args.to} against the automatic checks (free, about a minute)...", flush=True)
     result = blueprint.fork(pkg, bp, args.to, args.version, given, name=args.name)
+    if not report_fork(result, bp):
+        sys.exit(1)
+
+
+def report_fork(result: dict, bp: dict) -> bool:
+    """Say what a fork by choices did, in plain words. True when the test was created."""
+    from engine.validate import plain_problems, plain_summary
+
     if not result["ok"]:
         where = (
             "Those values are not allowed"
@@ -324,7 +331,7 @@ def fork_by_choices(args, pkg):
         for problem in plain_problems(result.get("levels") or {}) or result["problems"]:
             print(f"  - {problem}")
         print("Nothing was written.")
-        sys.exit(1)
+        return False
     units = {name: v.get("unit", "") for name, v in bp["variables"].items()}
     print(f"\nCREATED {result['ref']}, forked from {result['forked_from']}\n\nYour choices")
     moved = {c["name"] for c in result["changed"]}
@@ -341,6 +348,137 @@ def fork_by_choices(args, pkg):
     print(f"  evidence  {w['evidence']}\n  suite     {w['suite']}")
     print("\nNext: race two models on it")
     print(f"  python gladiator.py match --suite {w['suite']} --a <provider:model> --b <provider:model> --max-usd 1")
+    return True
+
+
+def cmd_chat(args):
+    """Talk your way to a test for your own flow: describe it, settle the closest test's open choices, and get a
+    sealed, validated test. A model may read your description (--model); everything else is the engine."""
+    import re
+    import textwrap
+
+    from engine import session
+
+    def say(text: str, indent: str = "  "):
+        """Print a paragraph wrapped for a terminal. Numbered clauses, "(1) ...", each start a new line."""
+        for part in re.split(r"\s+(?=\(\d+\)\s)", " ".join(str(text).split())):
+            print(textwrap.fill(part, width=100, initial_indent=indent, subsequent_indent=indent))
+
+    def first_sentence(text: str) -> str:
+        return text.split(". ", 1)[0].rstrip(".") + "."
+
+    def ask(prompt: str) -> str:
+        try:
+            return input(prompt).strip()
+        except EOFError:
+            print("\nStopped. Nothing was written.")
+            raise SystemExit(0) from None
+
+    def yes(prompt: str) -> bool:
+        return ask(f"{prompt} [Y/n] ").lower() not in ("n", "no")
+
+    reader = None
+    if args.model:
+        load_dotenv(ROOT / ".env")
+        reader = session.ModelReader(args.model, args.max_usd)
+    talk = session.ForkSession(reader=reader)
+
+    print("Describe the flow you want to test, in your own words.")
+    found = talk.describe(ask("> "))
+    if found["note"]:
+        print(found["note"])
+    if found["read_by"]:
+        print(
+            f"(Read by {found['read_by']} for ${found['read_cost_usd']:.4f}. It only reads; the engine does the rest.)"
+        )
+    forkable = found["forkable"]
+    if not forkable:
+        print("\nNo test in the library that you can adapt matches that description.")
+        print("Run `gladiator blueprints` to see every test. A flow with a different shape needs a new blueprint.")
+        return
+    ref = found["proposed"]
+    if ref is None:
+        print(f"\nNone of the tests is the same kind of job. {found['why']}")
+    while True:
+        if ref is None:
+            print("\nThe closest tests you can adapt:")
+            for i, m in enumerate(forkable, start=1):
+                print(f"  {i}. {m['name']} ({m['ref']})")
+                say(first_sentence(m["description"]), "     ")
+            picked = ask("Type a number to use one, or press Enter to stop: ")
+            if not picked.isdigit() or not 1 <= int(picked) <= len(forkable):
+                print("Stopped. Nothing was written.")
+                return
+            ref = forkable[int(picked) - 1]["ref"]
+        chosen = talk.choose(ref)
+        print(f"\nClosest test: {chosen['name']} ({chosen['ref']})")
+        say(first_sentence(chosen["description"]))
+        if found["proposed"] == ref and found["why"]:
+            say(f"Why this one: {found['why']}")
+        if yes("Is this the kind of job you mean?"):
+            break
+        ref = None
+
+    def put(question: dict, number: str):
+        unit = f" {question['unit']}" if question.get("unit") else ""
+        limits = f"; allowed {question['min']} to {question['max']}" if "min" in question else ""
+        came = "from your description" if question["source"] == "your description" else "the test's own value"
+        if question["source"] == "you":
+            came = "your answer"
+        own = "" if question["value"] == question["default"] else f"; the test's own value is {question['default']}"
+        print(f"\n{number}  {question['ask']}")
+        print(f"   {question['value']}{unit}  ({came}{own}{limits})")
+        while True:
+            given = talk.answer(question["name"], ask("   > "))
+            if given["ok"]:
+                return
+            print(f"   {given['problem'].split(': ', 1)[-1]} Try again, or press Enter to keep {question['value']}.")
+
+    for line in chosen["unusable"]:
+        print(f"(Could not use a value read from your description: {line})")
+    if chosen["not_covered"]:
+        print("\nThis test cannot change these parts of what you described. They stay as the test has them:")
+        for item in chosen["not_covered"]:
+            print(f"  - {item}")
+    questions = chosen["questions"]
+    print(f"\nThis test lets you change {len(questions)} things. Press Enter to keep the value shown.")
+    for i, question in enumerate(questions, start=1):
+        put(question, f"{i} of {len(questions)}")
+    while True:
+        look = talk.review()
+        if not look["broken"]:
+            break
+        for rule in look["broken"]:
+            print(f"\n{rule['say']}")
+            for question in talk.questions(rule["choices"]):
+                put(question, "Again:")
+
+    print("\nYour test's rules, as a model will be told them:")
+    say(look["rules"])
+    if look["changed"]:
+        print(
+            "\nChanged from the test you started from: "
+            + ", ".join(f"{c['name']} {c['from']} -> {c['to']}" for c in look["changed"])
+        )
+    else:
+        print("\nNothing is changed from the test you started from.")
+
+    while True:
+        name = ask("\nWhat should your test be called? (for example: returns desk) ")
+        owner = args.owner or ask("And your name or team, for its id (for example: acme): ")
+        new_id = f"{session.slug(owner)}/{session.slug(name)}"
+        if new_id.count("/") != 1 or not all(new_id.split("/")):
+            print("Both need at least one letter or digit.")
+        elif (ROOT / "challenges" / new_id).exists():
+            print(f"{new_id} already exists. Pick another name.")
+        else:
+            break
+    if not yes(f"Create {new_id}? It is checked first (free, about a minute)."):
+        print("Stopped. Nothing was written.")
+        return
+    print("Checking...", flush=True)
+    if not report_fork(talk.create(new_id, name=name), talk.bp):
+        sys.exit(1)
 
 
 def cmd_fork(args):
@@ -524,6 +662,12 @@ def main(argv=None):
     bl.add_argument("description", nargs="*", help="your flow in your own words (omit to list every test)")
     bl.add_argument("--json", action="store_true", help="print the matches as JSON")
     bl.set_defaults(func=cmd_blueprints)
+
+    ct = sub.add_parser("chat", help="talk your way to a test for your own flow (describe, choose, create)")
+    ct.add_argument("--model", help="a model to read your description, e.g. openai:gpt-6-luna (optional)")
+    ct.add_argument("--max-usd", type=float, default=0.05, help="most the reading may cost in USD (default 0.05)")
+    ct.add_argument("--owner", help="your name or team, for the new test's id (asked if not given)")
+    ct.set_defaults(func=cmd_chat)
 
     ch = sub.add_parser("choices", help="what a test lets you change when you fork it")
     ch.add_argument("challenge", help="namespace/name@version")
