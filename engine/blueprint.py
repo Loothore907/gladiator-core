@@ -169,6 +169,7 @@ def fork(
     given: dict | None = None,
     root: Path = packages.ROOT,
     only_levels: list[str] | None = None,
+    name: str | None = None,
 ) -> dict:
     """Fork a challenge by choosing values for its open choices: check the values, render the spec, validate it
     automatically, and only then write a new sealed package, its validation record and a one-test suite.
@@ -193,9 +194,15 @@ def fork(
         return {"ok": False, "stage": "validation", "problems": found, "levels": levels, "changed": changed(bp, values)}
     version = new_version or "1.0.0"
     spec_rel = pkg.manifest["params"]["spec"]
-    path = packages.fork(
-        pkg, new_id, version, root, replace={spec_rel: text}, extra={"choices": {"of": pkg.ref, "values": values}}
-    )
+    differs = changed(bp, values)
+    said = ", ".join(f"{c['name']} {c['from']} -> {c['to']}" for c in differs) or "none (the blueprint's defaults)"
+    extra = {
+        "name": name or pkg.manifest["name"],
+        "description": f"{pkg.manifest['name']} ({pkg.ref}) with these choices changed: {said}. "
+        "Everything else is as in that test.",
+        "choices": {"of": pkg.ref, "values": values},
+    }
+    path = packages.fork(pkg, new_id, version, root, replace={spec_rel: text}, extra=extra)
     manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
     ref = f"{manifest['id']}@{manifest['version']}"
 
@@ -206,8 +213,6 @@ def fork(
     evidence.parent.mkdir(parents=True, exist_ok=True)
     evidence.write_text(json.dumps({"sha256": record.sha256(body), "body": body}, indent=1) + "\n", encoding="utf-8")
 
-    differs = changed(bp, values)
-    said = ", ".join(f"{c['name']} {c['from']} -> {c['to']}" for c in differs) or "none (the blueprint's defaults)"
     suite = {
         "suite": manifest["id"].replace("/", "-"),
         "version": 1,

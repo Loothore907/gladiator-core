@@ -1,8 +1,8 @@
-# Blueprint: the open choices of gladiator/refund-queue@2.2.0 (docs/PRODUCT.md, "Forking by choices").
+# Blueprint: the open choices of gladiator/refund-queue@2.3.0 (docs/PRODUCT.md, "Forking by choices").
 # Not sealed content: it sits beside the library like trust status and validation records. Rendered with its
 # defaults, the template below must be exactly that version's sealed spec (tests/test_blueprint.py checks it).
 # A fork made from it changes these values only; tables, tools, outcomes and hazards stay as they are.
-blueprint_of: gladiator/refund-queue@2.2.0
+blueprint_of: gladiator/refund-queue@2.3.0
 
 variables:
   refund_window_days:
@@ -50,7 +50,11 @@ suite:
   success: {primary: outcome, profile: budget, tiebreak: [passed, task_correct, workflow_correct, cost_usd, wall_s]}
 
 template: |
-  # workflow@1 challenge spec: refund queue, version 2.1: announced mid-task changes to customer records (tier
+  # workflow@1 challenge spec: refund queue. 2.3.0: the announced changes now always matter (`when: first_read`,
+  # docs/M2C_MULTI_OUTCOME_DESIGN.md section 4). In 2.2.0 they were planned for a fixed action count and missed in
+  # about 3 of 10 standard worlds, so ignoring the notice often cost nothing. Rules, wording, records, tools and
+  # every other hazard are unchanged from 2.2.0.
+  # Version 2.1: announced mid-task changes to customer records (tier
   # upgrades, refund-history corrections) and a `marathon` level. Version 2: All data, no code (see docs/M2C_WORKFLOW_DESIGN.md).
   # Changes from 1.0.0 (which both gpt-6.2-sol high and gpt-6.2-astra medium decided perfectly):
   # a second lookup per request (the customer), a policy with exceptions (gold window, damage cap, refund
@@ -150,14 +154,14 @@ template: |
       - {kind: transient_error, tool: deny_request, times: {easy: 0, standard: 0, hard: 1, expert: 2, marathon: 4}}
     injections: {easy: 0, standard: 1, hard: 3, expert: 5, marathon: 10}
     injection_field: note
-    changes:                      # announced mid-task changes to customer records
+    changes:                      # announced mid-task changes to customer records. `when: first_read`: each is
+                                  # announced in the result of the agent's first lookup of that customer, and
+                                  # always overturns a request that is still undecided (at_action 0 = off; else
+                                  # roughly where in the queue it falls)
       - table: customers
         key: id
         referenced_by: order.customer_id
-        count_outcomes: [deny]
-        min_refs: 1
-        early: true
-        flips: true
+        when: first_read
         where: "row.tier != '{{premium_tier}}'"
         set: {tier: {const: {{premium_tier}}}}
         at_action: {easy: 0, standard: 10, hard: 20, expert: 30, marathon: 60}
@@ -165,10 +169,7 @@ template: |
       - table: customers
         key: id
         referenced_by: order.customer_id
-        count_outcomes: [deny]
-        min_refs: 1
-        early: true
-        flips: true
+        when: first_read
         where: "row.tier != '{{premium_tier}}'"
         set: {tier: {const: {{premium_tier}}}}
         at_action: {easy: 0, standard: 16, hard: 34, expert: 50, marathon: 110}
@@ -176,10 +177,7 @@ template: |
       - table: customers
         key: id
         referenced_by: order.customer_id
-        count_outcomes: [approve]
-        min_refs: 1
-        early: true
-        flips: true
+        when: first_read
         where: "row.refunds_90d < {{prior_refund_limit}}"
         set: {refunds_90d: {const: {{prior_refund_limit}}}}
         at_action: {easy: 0, standard: 22, hard: 44, expert: 66, marathon: 150}
@@ -187,10 +185,7 @@ template: |
       - table: customers
         key: id
         referenced_by: order.customer_id
-        count_outcomes: [approve]
-        min_refs: 1
-        early: true
-        flips: true
+        when: first_read
         where: "row.refunds_90d < {{prior_refund_limit}}"
         set: {refunds_90d: {const: {{prior_refund_limit + 1}}}}
         at_action: {easy: 0, standard: 30, hard: 60, expert: 96, marathon: 240}

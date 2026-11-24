@@ -546,7 +546,7 @@ def plain_summary(levels: dict) -> list[str]:
         for name, p in r["players"].items():
             if p["must_fail"]:
                 got, of, ok = totals.get(name, (0, 0, True))
-                totals[name] = (got + p["passed_seeds"], of + r["seeds"], ok and p["ok"])
+                totals[name] = (got + p["passed_seeds"], of + p.get("seeds", r["seeds"]), ok and p["ok"])
     for name, (got, of, ok) in totals.items():
         words = PLAYER_WORDS.get(name) or f"leaves out one exception ({name.split(':', 1)[-1]})"
         verdict = "caught" if ok else "NOT caught often enough"
@@ -564,9 +564,9 @@ def plain_problems(levels: dict) -> list[str]:
         for name, p in r["players"].items():
             if p["must_fail"] and not p["ok"]:
                 words = PLAYER_WORDS.get(name) or f"leaves out one exception ({name.split(':', 1)[-1]})"
-                allowed = int(r["seeds"] * (0.15 if name == "stale" else 0.1))
                 out.append(
-                    f"{level}: a player that {words} got through {p['passed_seeds']} of {r['seeds']} "
-                    f"generated queues (at most {allowed} allowed), so that corner can be cut too often."
+                    f"{level}: a player that {words} got through {p['passed_seeds']} of "
+                    f"{p.get('seeds', r['seeds'])} generated queues, clearly more than the "
+                    f"{p.get('allowed', allowed_share(name)):.0%} allowed, so that corner can be cut too often."
                 )
     return out

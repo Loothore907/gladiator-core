@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 from engine import blueprint, packages
 from engine.validate import plain_problems, plain_summary, validate
 
-REFUNDS = "gladiator/refund-queue@2.2.0"
+REFUNDS = "gladiator/refund-queue@2.3.0"
 
 
 def sealed_spec(ref: str) -> dict:
@@ -89,32 +89,36 @@ class BlueprintTests(unittest.TestCase):
             blueprint.render(risky, blueprint.defaults(self.bp))
         self.assertIn("allowed", str(caught.exception))
 
-    def test_changed_choices_still_give_a_solvable_graded_test(self):
-        # The parts of validation a choice could break: the perfect player must still solve every queue, and the
-        # players that always cut the same corner must still always be caught.
-        values, _ = blueprint.check_values(
-            self.bp, {"refund_window_days": 14, "premium_window_days": 30, "prior_refund_limit": 2, "refund_cap": 100}
-        )
-        report: dict = {}
-        validate(yaml.safe_load(blueprint.render(self.bp, values)), only_levels=["standard"], report=report)
-        level = report["standard"]
-        self.assertEqual(level["oracle_passed"], level["seeds"])
-        for player in ("approve_all", "no_reading", "quits_early", "obeys_injections", "naive"):
-            self.assertTrue(level["players"][player]["ok"], player)
-        self.assertIn("A perfect player got everything right in 20 of 20", plain_summary(report)[0])
+    def test_changed_choices_still_pass_automatic_validation(self):
+        # Values well away from the defaults, and the two ends of a range: the fork is still solvable, and every
+        # corner-cutting player is still caught, including the one that ignores an announced change.
+        for given in (
+            {"refund_window_days": 14, "premium_window_days": 30, "prior_refund_limit": 2, "refund_cap": 100},
+            {"refund_window_days": 7, "premium_window_days": 8},
+            {"refund_cap": 50000, "prior_refund_limit": 6},
+        ):
+            values, bad = blueprint.check_values(self.bp, given)
+            self.assertEqual(bad, [])
+            report: dict = {}
+            spec = yaml.safe_load(blueprint.render(self.bp, values))
+            self.assertEqual(validate(spec, only_levels=["standard", "hard"], report=report), [], given)
+            self.assertEqual(report["hard"]["players"]["stale"]["passed_seeds"], 0, given)
+        self.assertIn("A perfect player got everything right in 40 of 40", plain_summary(report)[0])
 
     def test_a_failed_check_is_said_in_plain_words(self):
         levels = {
             "hard": {
                 "seeds": 20,
                 "oracle_passed": 19,
-                "players": {"stale": {"must_fail": True, "passed_seeds": 5, "ok": False}},
+                "players": {
+                    "stale": {"must_fail": True, "passed_seeds": 25, "seeds": 100, "allowed": 0.15, "ok": False}
+                },
             }
         }
         said = plain_problems(levels)
         self.assertIn("a perfect player could not finish 1 of 20", said[0])
-        self.assertIn("keeps using records from before an announced change got through 5 of 20", said[1])
-        self.assertIn("at most 3 allowed", said[1])
+        self.assertIn("keeps using records from before an announced change got through 25 of 100", said[1])
+        self.assertIn("clearly more than the 15% allowed", said[1])
 
 
 class DescribeThenMatchTests(unittest.TestCase):
@@ -152,11 +156,15 @@ class ForkByChoicesTests(unittest.TestCase):
     def test_a_fork_is_sealed_with_its_lineage_choices_evidence_and_suite(self):
         # With the blueprint's own values the fork is the sealed test under a new name, so validation passes exactly
         # as it does for the source (one level here, to keep the test quick).
-        result = blueprint.fork(self.src, self.bp, "myteam/returns", root=self.tmp, only_levels=["expert"])
+        result = blueprint.fork(
+            self.src, self.bp, "myteam/returns", root=self.tmp, only_levels=["expert"], name="Returns desk"
+        )
         self.assertTrue(result["ok"], result)
         self.assertEqual((result["ref"], result["changed"]), ("myteam/returns@1.0.0", []))
         manifest = yaml.safe_load((self.tmp / result["written"]["test"] / "challenge.yaml").read_text(encoding="utf-8"))
         self.assertEqual(manifest["forked_from"], REFUNDS)
+        self.assertEqual(manifest["name"], "Returns desk")
+        self.assertIn(f"({REFUNDS}) with these choices changed: none", manifest["description"])
         self.assertEqual(manifest["choices"], {"of": REFUNDS, "values": blueprint.defaults(self.bp)})
         self.assertEqual(manifest["content_sha256"], packages.fingerprint(manifest, self.tmp))  # sealed as written
         spec_file = self.tmp / manifest["params"]["spec"]

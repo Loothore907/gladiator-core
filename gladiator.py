@@ -312,8 +312,8 @@ def fork_by_choices(args, pkg):
         if not eq:
             raise SystemExit(f"--set takes choice=value, got '{item}'")
         given[name.strip()] = value.strip()
-    print(f"Checking {args.to} against the automatic checks (free, under a minute)...", flush=True)
-    result = blueprint.fork(pkg, bp, args.to, args.version, given)
+    print(f"Checking {args.to} against the automatic checks (free, about a minute)...", flush=True)
+    result = blueprint.fork(pkg, bp, args.to, args.version, given, name=args.name)
     if not result["ok"]:
         where = (
             "Those values are not allowed"
@@ -517,6 +517,7 @@ def main(argv=None):
         help="fork by choices: set one of the source's open choices (see `choices`); repeat for more. "
         "The fork is validated and sealed, never edited by hand (default version 1.0.0)",
     )
+    fk.add_argument("--name", help="with --set: what to call the new test (default: the source's name)")
     fk.set_defaults(func=cmd_fork)
 
     bl = sub.add_parser("blueprints", help="describe your flow: find the closest tests in the library")
