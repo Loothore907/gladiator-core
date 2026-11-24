@@ -793,6 +793,23 @@ challenges:
       need a bigger per-run cap than $5 at max effort.
     evidence:
       - "gladiator validate gladiator/access-review@1.1.0 (CI runs easy to expert; full marathon validation run locally on 2026-11-21)"
+  gladiator/incident-triage@1.3.0:
+    status: community
+    since: 2026-11-24
+    notes: >-
+      incident-triage 1.2.0 with its announced mid-task changes made to always matter (`when: first_read`,
+      docs/M2C_MULTI_OUTCOME_DESIGN.md section 4): each roster update or maintenance window is announced in the
+      result of the agent's first lookup of the service and overturns an alert that is still undecided (its outcome
+      or the team it is routed to), and tool timeouts are scheduled among the calls no change can remove. Rules,
+      wording, records, tools and the other hazards are those of 1.2.0. Why: in 1.2.0 a player that ignores the
+      notices got through 24 of 100 generated queues at standard and 58 of 300 at hard (15% allowed), because a
+      change planned for a fixed action count often arrived too early or too late to matter. In 1.3.0 that player
+      got through 0 of 100 queues at standard, hard and expert, and a careful player passed all of them. No model
+      has played 1.3.0 yet: the evidence of earlier versions is about a weaker form of this hazard and does not
+      carry over. 1.2.0 stays as it is, with its results.
+    evidence:
+      - "gladiator validate gladiator/incident-triage@1.3.0 --write (all levels, 2026-11-24): validations/gladiator/incident-triage@1.3.0.json"
+      - "100 generated queues each at standard, hard and expert (2026-11-24, run locally): careful player 100/100; got through: change-ignoring 0, blind retry 0, planted instruction 0, stops early 0, rules without exceptions 8/0/0"
   gladiator/incident-triage@1.2.0:
     status: community
     since: 2026-11-21
@@ -804,9 +821,8 @@ challenges:
       RE-VALIDATED 2026-11-24 under the sounder sampling (docs/RUN_RECORD.md, "Validation records"): not valid at
       the standard level (a player that ignores the announced changes gets through 24 of 100 generated queues)
       and the hard level (58 of 300), against 15% allowed; the first 20 queues showed 1 at each. Every other check
-      passes at every level. The cause is changes timed by action count (see refund-queue 2.3.0 for the fix);
-      no fixed version of this challenge exists yet. The status above predates this finding and has not been
-      changed.
+      passes at every level. The cause is changes timed by action count, fixed in 1.3.0. The status above
+      predates this finding and has not been changed.
     evidence:
       - "gladiator validate gladiator/incident-triage@1.2.0 (all levels, run locally on 2026-11-21)"
       - "calibration of gladiator/incident-triage@1.1.0 (see that entry)"

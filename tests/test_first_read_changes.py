@@ -109,5 +109,45 @@ class FirstReadChangeTests(unittest.TestCase):
             self.assertEqual(record["levels"][level]["players"]["stale"]["passed_seeds"], 0, level)
 
 
+class SeveralOutcomeTests(unittest.TestCase):
+    """The same guarantee where an item has several possible outcomes with details (incident-triage 1.3.0): a
+    change may overturn the outcome (a service enters maintenance) or only the detail (who the alert is routed to)."""
+
+    REF = "gladiator/incident-triage@1.3.0"
+
+    def setUp(self):
+        self.spec = spec_of(self.REF)
+
+    def test_every_announced_change_overturns_an_outcome_or_its_details(self):
+        kinds = set()
+        for level in ("standard", "expert"):
+            for seed in range(1, 16):
+                m = Workflow(self.spec, seed=seed, difficulty=level)
+                self.assertTrue(m.change_plan, (level, seed))
+                for ch in m.change_plan:
+                    after = copy.deepcopy(m.world0)
+                    after[ch["table"]][ch["index"]].update(ch["set"])
+                    new, new_args = m._truth(after)
+                    outcome = [k for k in ch["touches"] if new[k] != m.expected[k]]
+                    details = [k for k in ch["touches"] if new_args.get(k, {}) != m.expected_args.get(k, {})]
+                    self.assertTrue(outcome or details, (level, seed))
+                    kinds.add("outcome" if outcome else "details")
+        self.assertEqual(kinds, {"outcome", "details"})  # both kinds of change really occur
+
+    def test_a_careful_player_passes_and_one_that_ignores_the_notices_never_does(self):
+        for level in ("standard", "hard"):
+            for seed in range(1, 31):
+                self.assertTrue(play(Workflow(self.spec, seed=seed, difficulty=level), "oracle").passed, (level, seed))
+                self.assertFalse(play(Workflow(self.spec, seed=seed, difficulty=level), "stale").passed, (level, seed))
+
+    def test_it_passes_automatic_validation_and_its_record_is_for_this_content(self):
+        self.assertEqual(validate(self.spec, only_levels=["hard", "expert"]), [])  # every level: the record below
+        record = json.loads((ROOT / "validations" / f"{self.REF}.json").read_text(encoding="utf-8"))["body"]
+        self.assertTrue(record["valid"])
+        self.assertEqual(record["challenge"]["content_sha256"], packages.resolve(self.REF).manifest["content_sha256"])
+        for level in ("standard", "hard", "expert", "marathon"):
+            self.assertEqual(record["levels"][level]["players"]["stale"]["passed_seeds"], 0, level)
+
+
 if __name__ == "__main__":
     unittest.main()

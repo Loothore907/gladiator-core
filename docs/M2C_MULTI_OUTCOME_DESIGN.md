@@ -122,7 +122,7 @@ acted on. `at_action` then only switches the change on per level (0 = off) and s
 should fall. A change with no such record in a world is not made there, and every world has at least one. Planned
 faults go among the calls no change can remove, so they are certain to fire. Records that planted-instruction
 items depend on are still left alone. Not yet combinable with timed changes or with coupled resources. Existing
-versions keep their timed changes exactly as they were; refund-queue 2.3.0 is the first to use this.
+versions keep their timed changes exactly as they were; refund-queue 2.3.0 and incident-triage 1.3.0 use this.
 
 ## 5. The two challenges on top
 
