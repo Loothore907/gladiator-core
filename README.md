@@ -122,6 +122,13 @@ Dockerfile            the Linux container
   which choices your words already settle. That is all it does. Its answers come back inside a schema built from
   the declared choices, the engine checks them again, and you confirm every value. Reading is capped at 5 cents
   (`--max-usd`); without `--model` the chat needs no key and costs nothing.
+- **The same conversation as a page:** `uv run gladiator serve` and open `http://127.0.0.1:8787/build`. Four
+  steps: describe your flow, confirm the closest test, make your choices, name it and create it. Beside the
+  choices the page shows the rules a model will be told, with each of your values marked where it lands, and it
+  updates as you type. Creating runs the same automatic validation and hands you the sealed test, its validation
+  record and a suite file as one download; nothing is added to the library. On a hosted runner, creating is for
+  signed-in visitors unless the runner is started with `--open-create`; anyone else is shown the exact
+  `gladiator fork` command for their choices.
 - `uv run gladiator validate <namespace/name@version>` checks a `workflow@1` challenge automatically: an
   oracle player must pass it and a set of deliberately bad players must fail it, at every difficulty.
 - A **test type** is the engine code that runs a kind of challenge (`modules/`, registered in
