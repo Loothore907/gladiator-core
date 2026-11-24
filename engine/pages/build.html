@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Build a test for your own flow</title>
+<link rel="stylesheet" href="/build.css">
+</head>
+<body>
+<header class="top">
+  <span class="brand">Gladiator</span>
+  <span class="who"><span id="who"></span> <button type="button" class="link" id="signin-open" hidden>Sign in</button></span>
+</header>
+
+<main>
+  <section class="card" id="signin" hidden aria-labelledby="signin-title">
+    <h2 id="signin-title">Sign in</h2>
+    <form id="signin-form" class="body">
+      <label for="signin-code">Access code</label>
+      <p class="hint">An invitation link signs you in by itself. If you were given a code instead, type it here.
+      Signing in lets you create your test on this page.</p>
+      <div class="field"><input id="signin-code" type="password" autocomplete="off" maxlength="200" required></div>
+      <p class="error" id="signin-error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="submit" class="primary">Sign in</button>
+        <button type="button" class="plain" id="signin-close">Not now</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="intro">
+    <h1>Build a test for your own flow</h1>
+    <p>Describe the work you want an AI agent to do. This page finds the closest test in the library, asks about
+    each thing that test lets you change, and gives you a sealed, checked test of your own. Using this page costs
+    you nothing.</p>
+    <ol class="steps" id="steps" aria-label="Steps">
+      <li data-step="describe">Describe your flow</li>
+      <li data-step="match">Confirm the closest test</li>
+      <li data-step="choices">Make your choices</li>
+      <li data-step="create">Name it and create it</li>
+    </ol>
+  </section>
+
+  <section class="card" id="describe" aria-labelledby="describe-title">
+    <h2 id="describe-title"><span class="num">1</span> Describe your flow</h2>
+    <div class="done" hidden></div>
+    <form class="body" id="describe-form">
+      <label for="description">What should the agent do? Say it the way you would brief a new hire.</label>
+      <textarea id="description" rows="4" maxlength="1200" required
+        placeholder="For example: we refund customers for damaged or late orders within 30 days. VIP customers get 45 days. A refund never pays out more than 250."></textarea>
+      <p class="hint" id="describe-hint"></p>
+      <p class="error" id="describe-error" role="alert" hidden></p>
+      <button type="submit" class="primary">Find the closest test</button>
+    </form>
+  </section>
+
+  <section class="card" id="match" aria-labelledby="match-title" hidden>
+    <h2 id="match-title"><span class="num">2</span> Confirm the closest test</h2>
+    <div class="done" hidden></div>
+    <div class="body" id="match-body"></div>
+  </section>
+
+  <section class="card" id="choices" aria-labelledby="choices-title" hidden>
+    <h2 id="choices-title"><span class="num">3</span> Make your choices</h2>
+    <div class="done" hidden></div>
+    <div class="body">
+      <p id="choices-lead"></p>
+      <div class="two">
+        <form id="choices-form" novalidate></form>
+        <aside class="rules" aria-live="polite">
+          <h3>What a model will be told</h3>
+          <p class="hint">These are the test's rules with your values in them. Click into a choice to see where
+          it lands.</p>
+          <p class="error" id="rules-error" role="alert" hidden></p>
+          <h4>The job</h4>
+          <p id="brief-text" class="rules-text"></p>
+          <h4>The rules</h4>
+          <p id="rules-text" class="rules-text"></p>
+          <p class="hint" id="rules-also"></p>
+        </aside>
+      </div>
+      <div id="not-covered" hidden></div>
+      <button type="button" class="primary" id="choices-next">These are right, go on</button>
+    </div>
+  </section>
+
+  <section class="card" id="create" aria-labelledby="create-title" hidden>
+    <h2 id="create-title"><span class="num">4</span> Name it and create it</h2>
+    <div class="body">
+      <form id="name-form" class="row" novalidate>
+        <div>
+          <label for="test-name">What should your test be called?</label>
+          <input id="test-name" type="text" maxlength="40" placeholder="Returns desk" autocomplete="off">
+        </div>
+        <div>
+          <label for="test-owner">Your name or team</label>
+          <input id="test-owner" type="text" maxlength="40" placeholder="acme" autocomplete="off">
+        </div>
+      </form>
+      <p class="hint" id="test-id"></p>
+      <div id="create-body" aria-live="polite"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>Tests are built and checked by the open <a href="https://github.com/Loothore907/gladiator-core">Gladiator
+  engine</a>. A test you create here is yours: it is handed to you as a download, it is not added to the library,
+  and this server drops its copy after 20 minutes.</p>
+</footer>
+<script src="/build.js"></script>
+</body>
+</html>

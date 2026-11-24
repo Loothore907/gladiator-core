@@ -13,6 +13,24 @@
                   the two models and streams what happens (text/event-stream: the runner's events, one per message),
                   ending with a `record` message that carries the sealed record and its private half.
 
+It also serves the page where a person builds a test of their own (GET /build), and the conversation behind it
+(docs/PRODUCT.md, section 4a; engine/session.py). Each request carries everything it needs, so the server keeps no
+conversation:
+
+  GET  /fork/tests      the tests that declare open choices
+  POST /fork/status     {"token"}: what this visitor may do here (have a model read, create)
+  POST /fork/describe   {"description", "token"}: the closest tests, the one proposed, and its questions
+  POST /fork/choose     {"ref"}: the questions of a test the visitor picked instead
+  POST /fork/review     {"ref", "values"}: every value checked, and the rules a model will be told with them
+  POST /fork/create     {"ref", "values", "name", "owner", "token"}: starts the checks; answers with a job id
+  GET  /fork/job?id=    how far the checks are, then what they found
+  GET  /fork/download?id=   the created test as a zip (sealed package, validation record, suite)
+
+A description is the only free text, and it never reaches the engine: it is matched by its words and, for a
+signed-in visitor on a server with a reader, read by one model whose answers come back inside a schema built from
+the declared choices. A created test is the visitor's to take away: it is built in a temporary folder, handed over
+as a download and not kept.
+
 A race is a suite built from safe choices, never new content: the task comes from a base suite's locked
 challenges, and every value in the request must be one this server offers (PRODUCT.md: "configurable, not
 editable"). Free text never reaches the engine.
@@ -37,13 +55,19 @@ from pathlib import Path
 import yaml
 
 import providers
-from engine import packages, record, runner
+from engine import blueprint, packages, record, runner, session
 from engine import suite as suites
 from engine.budget import price_for
+from engine.validate import plain_problems, plain_summary
 from scorers import components
 from scorers.efficiency import PROFILES
 
 SESSION_DAYS = 30  # how long a sign-in lasts
+PAGES = Path(__file__).resolve().parent / "pages"  # the build page's three static files
+JOB_MINUTES = 20  # how long a created test waits to be downloaded
+MAX_JOBS = 20
+MAX_DESCRIPTION = 1200
+RESERVED_OWNERS = {"gladiator"}  # the library's own namespace
 
 
 def who_of(code: str) -> str:
@@ -154,7 +178,7 @@ def is_batch(sealed: dict) -> bool:
 
 LIVE_LEVELS = ("easy", "standard")  # harder levels take too long and cost too much to watch live
 HEARTBEAT_S = 10  # hosts cut a stream that stays silent; a comment line keeps it open
-MAX_BODY = 4096
+MAX_BODY = 8192  # a description of 1,200 characters, in any alphabet, with the rest of the request
 
 
 class Refused(Exception):
@@ -256,6 +280,41 @@ class Ledger:
                 share = spent / len(names) if spent_by is None else spent_by.get(name, 0.0)
                 entry["spent_usd"] = round(entry["spent_usd"] + share, 6)
             self.state["races"] += 1
+            self._save()
+
+    def uses_left(self, kind: str, who: str, limit: int) -> int:
+        return max(0, limit - (self.state.get(kind) or {}).get(who, 0))
+
+    def use(self, kind: str, who: str, limit: int):
+        """Count one use of something each sign-in may do a limited number of times ("reads", "creates")."""
+        with self.lock:
+            used = self.state.setdefault(kind, {})
+            if used.get(who, 0) >= limit:
+                raise Refused(429, f"This sign-in has used its {limit} {kind} here.")
+            used[who] = used.get(who, 0) + 1
+            self._save()
+
+    def hold_small(self, cap: float, provider: str):
+        """Reserve the cap of something that is not a race (a model reading a description) against the same
+        limits: the total and that provider's budget."""
+        with self.lock:
+            if self.total_usd is not None and cap > self.left() + 1e-9:
+                raise Refused(402, "The live demo's spending limit has been reached.")
+            left = self.left_for(provider)
+            if left is not None and cap > left + 1e-9:
+                raise Refused(402, f"The live budget for {provider} models is used up.")
+            self.state["held_usd"] += cap
+            self._provider(provider)["held_usd"] += cap
+            self._save()
+
+    def settle_small(self, cap: float, spent: float, provider: str):
+        with self.lock:
+            self.state["held_usd"] = max(0.0, self.state["held_usd"] - cap)
+            self.state["spent_usd"] = round(self.state["spent_usd"] + spent, 6)
+            entry = self._provider(provider)
+            entry["held_usd"] = max(0.0, entry["held_usd"] - cap)
+            entry["spent_usd"] = round(entry["spent_usd"] + spent, 6)
+            self.state["read_usd"] = round(self.state.get("read_usd", 0.0) + spent, 6)
             self._save()
 
 
@@ -458,7 +517,7 @@ class Races:
         runs = ask["runs"]
         cap = self.cap_for(runs)
         if not self.busy.acquire(blocking=False):
-            raise Refused(409, "Another race is running. Try again in a minute.")
+            raise Refused(409, "The runner is busy with another race or a test being checked. Try again in a minute.")
         try:
             suite = self.suite_for(ask)
             sides = {"A": providers.parse(ask["a"])[0], "B": providers.parse(ask["b"])[0]}
@@ -508,12 +567,285 @@ class Races:
             self.busy.release()
 
 
-def handler_for(races: Races):
+def first_sentence(text: str) -> str:
+    return " ".join(str(text).split()).split(". ", 1)[0].rstrip(".") + "."
+
+
+class Forks:
+    """The conversation from a description to a test of one's own, one request at a time (engine/session.py).
+
+    `reader`: the model that reads a signed-in visitor's description (None: descriptions are matched by their
+    words only). Each read is capped at `read_usd`, held against that provider's budget like a race, and counted
+    per sign-in. Creating a test costs no money but a minute or so of this machine, so it shares the one-thing-
+    at-a-time rule with races and is counted per sign-in too. `open_create` lets anyone create, signed in or not.
+    """
+
+    def __init__(
+        self,
+        races: Races,
+        reader: str | None = None,
+        read_usd: float = 0.01,
+        reads_per_code: int = 30,
+        creates_per_code: int = 10,
+        open_create: bool = False,
+        levels: list[str] | None = None,
+    ):
+        self.races, self.ledger = races, races.ledger
+        self.reader, self.read_usd = reader, read_usd
+        self.reads_per_code, self.creates_per_code = reads_per_code, creates_per_code
+        self.open_create, self.levels = open_create, levels
+        if reader:
+            price_for(*providers.parse(reader))  # a reader without a price cannot be capped: refuse now
+        self.make_reader = lambda: session.ModelReader(self.reader, self.read_usd)
+        self.jobs: dict[str, dict] = {}
+        self.lock = threading.Lock()
+        # The library is read once: it is part of the image and does not change while the server runs.
+        self.known: dict = {}
+        self.offered: dict | None = None
+
+    # ---- who is asking, and what they may do
+    def who(self, ask: dict) -> str | None:
+        try:
+            return self.races.identify(ask)
+        except Refused:
+            return None
+
+    def status(self, ask: dict) -> dict:
+        who = self.who(ask if isinstance(ask, dict) else {})
+        return {
+            "needs_invite": self.races.codes is not None,
+            "signed_in": who is not None,
+            "reads": bool(self.reader and who),
+            "reads_when_signed_in": bool(self.reader),
+            "reader": self.reader if self.reader and who else None,
+            "can_create": bool(who or self.open_create),
+            "creates_left": self.ledger.uses_left("creates", who or "public", self.creates_per_code),
+        }
+
+    # ---- the steps
+    def tests(self) -> dict:
+        if self.offered is None:
+            known = blueprint.library()
+            out = []
+            for pkg in packages.catalog().values():
+                if pkg.ref in known and pkg.status.get("status") != "retired":
+                    about = first_sentence(pkg.manifest.get("description", ""))
+                    out.append({"ref": pkg.ref, "name": pkg.manifest["name"], "about": about})
+            self.offered = {"tests": out}
+        return self.offered
+
+    def _questions(self, talk: session.ForkSession, ref: str) -> dict:
+        chosen = talk.choose(ref)
+        return {
+            "ref": ref,
+            "name": chosen["name"],
+            "about": first_sentence(chosen["description"]),
+            "questions": chosen["questions"],
+            "not_covered": chosen["not_covered"],
+            "unusable": chosen["unusable"],
+            "places": blueprint.places(talk.bp),
+        }
+
+    def describe(self, ask: dict) -> dict:
+        text = " ".join(str(ask.get("description") or "").split())
+        if not text:
+            raise Refused(400, "Describe the flow you want to test, in a sentence or two.")
+        if len(text) > MAX_DESCRIPTION:
+            raise Refused(400, f"Keep the description under {MAX_DESCRIPTION} characters.")
+        who, reader, provider = self.who(ask), None, None
+        if self.reader and who:
+            provider = providers.parse(self.reader)[0]
+            try:  # no budget, no reads left or no reader: the description's words still match
+                self.ledger.hold_small(self.read_usd, provider)
+                try:
+                    self.ledger.use("reads", who, self.reads_per_code)
+                    reader = self.make_reader()
+                except Exception:
+                    self.ledger.settle_small(self.read_usd, 0.0, provider)
+                    raise
+            except Exception as e:  # noqa: BLE001  the page works without a reader
+                if not isinstance(e, Refused):
+                    runner.say(f"  [serve] the reader could not start: {type(e).__name__}")
+        talk = session.ForkSession(reader=reader, known=self.known)
+        try:
+            found = talk.describe(text)
+        finally:
+            if reader:
+                self.ledger.settle_small(self.read_usd, reader.spent_usd, provider)
+        # Tests that match the description's words better than any test with open choices, but declare none
+        # themselves: the page names them, and does not pass an adaptable test off as the closest one.
+        closer = []
+        for m in found["matches"]:
+            if m["choices"]:
+                break
+            closer.append({"ref": m["ref"], "name": m["name"], "matched": m["matched"]})
+        out = {
+            "matches": [
+                {"ref": m["ref"], "name": m["name"], "about": first_sentence(m["description"]), "matched": m["matched"]}
+                for m in found["forkable"]
+            ],
+            "closer": closer[:3],
+            "proposed": found["proposed"],
+            "why": found["why"],
+            "read_by": found["read_by"],
+            "note": found["note"],
+            "test": None,
+        }
+        if found["proposed"]:
+            out["test"] = self._questions(talk, found["proposed"])
+        return out
+
+    def _forkable(self, ask: dict) -> str:
+        ref = str(ask.get("ref") or "")
+        if ref not in {t["ref"] for t in self.tests()["tests"]}:
+            raise Refused(400, "Choose one of the tests this page offers.")
+        return ref
+
+    def choose(self, ask: dict) -> dict:
+        return self._questions(session.ForkSession(known=self.known), self._forkable(ask))
+
+    def _settle(self, ask: dict) -> tuple[session.ForkSession, dict]:
+        """A conversation brought to the values in the request: the session, and what is wrong with any value."""
+        talk = session.ForkSession(known=self.known)
+        talk.choose(self._forkable(ask))
+        values = ask.get("values")
+        if not isinstance(values, dict):
+            raise Refused(400, "Send the values as an object.")
+        problems = {}
+        for name, raw in values.items():
+            given = talk.answer(str(name), raw)
+            if not given["ok"]:
+                problems[str(name)] = given["problem"].split(": ", 1)[-1]
+        return talk, problems
+
+    def review(self, ask: dict) -> dict:
+        talk, problems = self._settle(ask)
+        look = talk.review()
+        sets = " ".join(f"--set {c['name']}={c['to']}" for c in look["changed"])
+        return {
+            "values": look["values"],
+            "problems": problems,
+            "broken": look["broken"],
+            "changed": look["changed"],
+            "shown": None if look["broken"] else blueprint.shown(talk.bp, talk.values),
+            "command": f"uv run gladiator fork {talk.pkg.ref} --to yourname/your-test {sets}".strip(),
+        }
+
+    def create(self, ask: dict) -> dict:
+        who = self.who(ask)
+        if not (who or self.open_create):
+            raise Refused(403, "Creating a test here is open to signed-in visitors for now.")
+        who = who or "public"
+        talk, problems = self._settle(ask)
+        if problems or talk.review()["broken"]:
+            raise Refused(400, "Some values are not allowed. Go back and check your choices.")
+        owner, name = session.slug(ask.get("owner") or "")[:40], session.slug(ask.get("name") or "")[:40]
+        if not owner or not name:
+            raise Refused(400, "Give the test a name, and your name or team: each needs a letter or a digit.")
+        if owner in RESERVED_OWNERS:
+            raise Refused(400, f'"{owner}" is the library\'s own name. Use your own name or team.')
+        if not self.races.busy.acquire(blocking=False):
+            raise Refused(409, "The runner is busy with a race or another test being checked. Try again in a minute.")
+        try:
+            self.ledger.use("creates", who, self.creates_per_code)
+        except Refused:
+            self.races.busy.release()
+            raise
+        job_id = secrets.token_urlsafe(12)
+        job = {
+            "state": "checking",
+            "level": None,
+            "number": 0,
+            "of": 0,
+            "started": time.time(),
+            "id": f"{owner}/{name}",
+        }
+        with self.lock:
+            self._forget_old()
+            while len(self.jobs) >= MAX_JOBS:
+                del self.jobs[min(self.jobs, key=lambda k: self.jobs[k]["started"])]
+            self.jobs[job_id] = job
+
+        def on_level(level, number, of):
+            job.update(level=level, number=number, of=of)
+
+        def work():
+            try:
+                label = " ".join(str(ask.get("name") or "").split())[:60] or None
+                result, archive = blueprint.fork_archive(
+                    talk.pkg, talk.bp, f"{owner}/{name}", talk.values, label, self.levels, on_level
+                )
+                if result["ok"]:
+                    job.update(
+                        state="created",
+                        ref=result["ref"],
+                        forked_from=result["forked_from"],
+                        changed=result["changed"],
+                        fingerprint=result["fingerprint"][:12],
+                        checked=plain_summary(result["levels"]),
+                        suite=result["written"]["suite"],
+                        archive=archive,
+                    )
+                else:
+                    found = plain_problems(result.get("levels") or {}) or result["problems"]
+                    job.update(state="refused", problems=found)
+            except Exception as e:  # noqa: BLE001  tell the visitor; nothing was written anywhere
+                job.update(state="failed", problems=[f"{type(e).__name__}: {e}"])
+            finally:
+                job["seconds"] = round(time.time() - job["started"], 1)
+                self.races.busy.release()
+
+        threading.Thread(target=work, daemon=True).start()
+        return {"job": job_id}
+
+    def _forget_old(self):
+        """A created test waits here for its download for JOB_MINUTES, then it is gone from this server."""
+        now = time.time()
+        for old in [k for k, j in self.jobs.items() if now - j["started"] > JOB_MINUTES * 60]:
+            del self.jobs[old]
+
+    def job(self, job_id: str) -> dict:
+        with self.lock:
+            self._forget_old()
+        job = self.jobs.get(job_id)
+        if not job:
+            raise Refused(404, "That test is no longer waiting here. Create it again.")
+        out = {k: v for k, v in job.items() if k not in ("archive", "started")}
+        out["seconds"] = job.get("seconds", round(time.time() - job["started"], 1))
+        out["download"] = bool(job.get("archive"))
+        out["kept_minutes"] = JOB_MINUTES
+        return out
+
+    def download(self, job_id: str) -> tuple[str, bytes]:
+        with self.lock:
+            self._forget_old()
+        job = self.jobs.get(job_id) or {}
+        if not job.get("archive"):
+            raise Refused(404, "That test is no longer waiting here. Create it again.")
+        return job["ref"].replace("/", "-").replace("@", "-") + ".zip", job["archive"]
+
+
+FORK_POSTS = ("/fork/status", "/fork/describe", "/fork/choose", "/fork/review", "/fork/create")
+STATIC = {
+    "/build": ("build.html", "text/html; charset=utf-8"),
+    "/build.css": ("build.css", "text/css; charset=utf-8"),
+    "/build.js": ("build.js", "text/javascript; charset=utf-8"),
+}
+# The page loads nothing from anywhere else and may only talk to this server.
+PAGE_POLICY = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; "
+    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+)
+
+
+def handler_for(races: Races, forks: Forks | None = None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def log_message(self, fmt, *args):  # one short line per request; never the body (it carries the code)
-            runner.say(f"  [serve] {self.command} {self.path.split('?')[0]} {args[1] if len(args) > 1 else ''}")
+            path = self.path.split("?")[0]  # nor the query: an invitation link carries its invite there
+            if path != "/fork/job":  # the page asks every second while a test is checked
+                runner.say(f"  [serve] {self.command} {path} {args[1] if len(args) > 1 else ''}")
 
         def _cors(self):
             origin = self.headers.get("Origin")
@@ -539,20 +871,46 @@ def handler_for(races: Races):
             self.send_header("Content-Length", "0")
             self.end_headers()
 
+        def _bytes(self, data: bytes, content_type: str, extra: dict | None = None):
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")  # an invitation link must not leak onward
+            for name, value in (extra or {}).items():
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(data)
+
         def do_GET(self):
-            path = self.path.split("?")[0]
+            path, _, query = self.path.partition("?")
+            asked = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair)
             if path == "/options":
                 self._json(200, races.options())
             elif path == "/health":
                 self._json(200, races.health())
             elif path == "/races":
                 self._json(200, races.races_run())
+            elif forks and path in STATIC:
+                name, content_type = STATIC[path]
+                self._bytes((PAGES / name).read_bytes(), content_type, {"Content-Security-Policy": PAGE_POLICY})
+            elif forks and path == "/fork/tests":
+                self._json(200, forks.tests())
+            elif forks and path in ("/fork/job", "/fork/download"):
+                try:
+                    if path == "/fork/job":
+                        return self._json(200, forks.job(asked.get("id", "")))
+                    name, data = forks.download(asked.get("id", ""))
+                    self._bytes(data, "application/zip", {"Content-Disposition": f'attachment; filename="{name}"'})
+                except Refused as no:
+                    self._json(no.status, {"error": no.reason})
             else:
                 self._json(404, {"error": "Not found."})
 
         def do_POST(self):
             path = self.path.split("?")[0]
-            if path not in ("/race", "/signin"):
+            if path not in ("/race", "/signin") and not (forks and path in FORK_POSTS):
                 return self._json(404, {"error": "Not found."})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -564,6 +922,10 @@ def handler_for(races: Races):
                     raise Refused(400, "That is not JSON.") from None
                 if path == "/signin":  # an invite (or a session to renew) for a session token
                     return self._json(200, races.sign_in(ask))
+                if path in FORK_POSTS:
+                    if not isinstance(ask, dict):
+                        raise Refused(400, "Send a JSON object.")
+                    return self._json(200, getattr(forks, path.rsplit("/", 1)[1])(ask))
                 races.check(ask)  # refuse a bad request with a plain answer, before any stream opens
             except Refused as no:
                 return self._json(no.status, {"error": no.reason})
@@ -642,7 +1004,7 @@ def handler_for(races: Races):
     return Handler
 
 
-def serve(races: Races, host: str, port: int) -> ThreadingHTTPServer:
+def serve(races: Races, host: str, port: int, forks: Forks | None = None) -> ThreadingHTTPServer:
     if races.codes is None and host not in ("127.0.0.1", "localhost", "::1"):
         raise SystemExit("Refusing to listen beyond this machine without access codes (set GLADIATOR_RACE_CODES).")
-    return ThreadingHTTPServer((host, port), handler_for(races))
+    return ThreadingHTTPServer((host, port), handler_for(races, forks))

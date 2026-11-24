@@ -157,7 +157,16 @@ def cmd_serve(args):
         batch_usd_per_run=args.batch_usd_per_run,
         batch_parallel=args.batch_parallel,
     )
-    server = serve.serve(races, args.host, args.port)
+    reader = args.reader
+    if reader:  # the model that reads a signed-in visitor's description on the build page
+        name = providers.parse(reader)[0]
+        if not (name == "scripted" or any(os.environ.get(k) for k in PROVIDER_KEYS.get(name, ()))):
+            print(
+                f"  no key for {reader} on this machine: descriptions will be matched by their words only", flush=True
+            )
+            reader = None
+    forks = serve.Forks(races, reader, args.read_usd, open_create=args.open_create)
+    server = serve.serve(races, args.host, args.port, forks)
     who = f"{len(codes)} invite(s)" if codes else "no invites: this machine only"
     limit = f"${total:.2f} in total" if total is not None else "the provider budgets"
     per = "".join(
@@ -167,7 +176,9 @@ def cmd_serve(args):
     print(
         f"Gladiator race runner on http://{args.host}:{server.server_address[1]}  ({who})\n"
         f"  tasks: {', '.join(races.tasks)}\n  models: {', '.join(models)}\n"
-        f"  cap ${args.max_usd:.2f} per race, ${ledger.left():.2f} left of {limit}{per}{out}",
+        f"  cap ${args.max_usd:.2f} per race, ${ledger.left():.2f} left of {limit}{per}{out}\n"
+        f"  build page: /build  (descriptions read by {reader or 'nobody: matched by their words'}; "
+        f"creating open to {'everyone' if args.open_create else 'signed-in visitors'})",
         flush=True,
     )
     try:
@@ -643,6 +654,17 @@ def main(argv=None):
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8787)
     sv.add_argument("--state", default="race_state", help="folder for the spending ledger and the races' records")
+    sv.add_argument(
+        "--reader",
+        help="a model that reads a signed-in visitor's description on the build page, e.g. openai:gpt-6-luna "
+        "(default: none, descriptions are matched by their words)",
+    )
+    sv.add_argument("--read-usd", type=float, default=0.01, help="hard cap for one reading of a description in USD")
+    sv.add_argument(
+        "--open-create",
+        action="store_true",
+        help="let anyone create a test on the build page (default: signed-in visitors only)",
+    )
     sv.set_defaults(func=cmd_serve)
 
     v = sub.add_parser("verify", help="check a run folder's hashes")

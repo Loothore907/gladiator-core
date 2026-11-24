@@ -161,8 +161,11 @@ class ForkSession:
     create(id)      validate, then write the sealed test, its evidence and its suite (engine.blueprint.fork)
     """
 
-    def __init__(self, root: Path = packages.ROOT, reader: ModelReader | None = None):
+    def __init__(self, root: Path = packages.ROOT, reader: ModelReader | None = None, known: dict | None = None):
+        """`known`: tests already read from disk ({ref: (package, its open choices)}), for a server that holds
+        many short conversations over a library that does not change while it runs."""
         self.root, self.reader = root, reader
+        self.known = known if known is not None else {}
         self.description = ""
         self.reading: dict = {}
         self.pkg = self.bp = None
@@ -193,10 +196,12 @@ class ForkSession:
         }
 
     def choose(self, ref: str) -> dict:
-        self.pkg = packages.resolve(ref)
-        self.bp = blueprint.load(ref, self.root)
-        if not self.bp:
-            raise blueprint.BlueprintError(f"{ref} declares no open choices, so it cannot be forked by choices")
+        if ref not in self.known:
+            pkg, bp = packages.resolve(ref), blueprint.load(ref, self.root)
+            if not bp:
+                raise blueprint.BlueprintError(f"{ref} declares no open choices, so it cannot be forked by choices")
+            self.known[ref] = (pkg, bp)
+        self.pkg, self.bp = self.known[ref]
         self.values, self.sources = blueprint.defaults(self.bp), {}
         unusable = []
         if self.reading.get("ref") == ref:

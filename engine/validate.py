@@ -366,11 +366,12 @@ def _policy_terms(text: str) -> set:
     return set(re.findall(r"\d+(?:\.\d+)?", plain)) | {f'"{q}"' for q in re.findall(r'"([^"]+)"', text)}
 
 
-def validate(spec: dict, only_levels: list[str] | None = None, report: dict | None = None) -> list[str]:
+def validate(spec: dict, only_levels: list[str] | None = None, report: dict | None = None, on_level=None) -> list[str]:
     """Return a list of problems (empty = valid). `only_levels` limits the seed runs (e.g. to keep CI fast);
     the per-level settings check always covers every level. Pass a dict as `report` to also get the evidence per
     level: how many seeds the oracle passed and, for each bad player, whether it had to fail and how often it
-    passed anyway (see validation_record)."""
+    passed anyway (see validation_record). `on_level(level, number, of)` is called as each level's checks start,
+    for anything that wants to show progress."""
     problems = []
     levels = spec.get("difficulty_levels", ["easy", "standard", "hard"])
     naive = (spec.get("validation") or {}).get("naive_policy") or (spec.get("validation") or {}).get("naive_outcomes")
@@ -407,7 +408,10 @@ def validate(spec: dict, only_levels: list[str] | None = None, report: dict | No
             problems.append(f"hidden counter {res['table']}.{res['field']} must start at {{const: 0}}")
         if not all(res["field"] in (t.get("hide") or []) for t in spec["tools"] if t.get("table") == res["table"]):
             problems.append(f"hidden counter {res['table']}.{res['field']} is shown by a tool (add it to `hide`)")
-    for level in [lv for lv in levels if not only_levels or lv in only_levels]:
+    checked = [lv for lv in levels if not only_levels or lv in only_levels]
+    for number, level in enumerate(checked, start=1):
+        if on_level:
+            on_level(level, number, len(checked))
         has_faults = any(
             present(f.get("times", 0), level) for f in hz.get("faults", []) if f["kind"] != "transient_error"
         )

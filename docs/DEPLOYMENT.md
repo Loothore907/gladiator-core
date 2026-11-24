@@ -47,6 +47,27 @@ uv run python gladiator.py serve                      # this machine only, your 
   what each cost), read back from the sealed records on disk, so a restart forgets none. Public facts only.
 - A browser page on another address must be named with `--origin`.
 
+### The build page (a test for your own flow)
+
+The runner also serves one page of its own, `GET /build`: the conversation of `gladiator chat` in a browser
+(docs/PRODUCT.md, section 4a). It is the same engine code (`engine/session.py`), one small request at a time.
+
+- **What anyone may do:** describe a flow, see the closest test, try values for its open choices and read the
+  rules with those values. None of that costs money or needs a sign-in. The description is matched by its words.
+- **What a sign-in adds:** creating the test on the page (`--open-create` opens that to everyone), and, when the
+  runner is started with `--reader provider:model`, that model reads the description: it says which test is the
+  same kind of job and which choices the words already settle. Each read is capped (`--read-usd`, 1 cent unless
+  set), reserved against that provider's budget before it starts like a race, and limited to 30 per sign-in.
+  A reader must have a price and this server must hold its provider's key, or it is not used.
+- **Creating a test** runs the full automatic validation, a minute or two of this machine's processor. It
+  shares the one-thing-at-a-time rule with races, and a sign-in may create 10. The result is handed over as a
+  zip (sealed test, validation record, suite file) and kept for 20 minutes; nothing is written into the image's
+  library, and no part of a visitor's description or test is logged.
+- **Free text never reaches the engine as structure.** A visitor's words are matched or read; everything that
+  shapes the test is one of the matched test's declared choices, checked by the engine against its allowed range.
+- The page loads nothing from any other address and may only talk to the server it came from (a strict
+  content-security policy). What the server answers is put on the page as text, never as markup.
+
 ## Rules for any hosted environment
 
 1. **One environment per purpose.** No parallel staging copies, preview environments or "campaign" layers

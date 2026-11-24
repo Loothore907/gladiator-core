@@ -16,9 +16,14 @@ grades, the wording the model reads, every rewording and the near-miss records. 
 only. The structure (tables, tools, outcomes, hazards) belongs to the blueprint and cannot be changed through it.
 """
 
+import dataclasses
+import io
 import json
 import math
 import re
+import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 
 import yaml
@@ -141,20 +146,67 @@ def check_values(bp: dict, given: dict | None = None) -> tuple[dict, list[str]]:
     return values, problems
 
 
-def render(bp: dict, values: dict) -> str:
+# Marks put around a filled-in value so a page can show where each choice lands (never in a spec that is run).
+_OPEN, _SEP, _CLOSE = "\ue000", "\ue001", "\ue002"
+_MARKED = re.compile(f"{_OPEN}(.*?){_SEP}(.*?){_CLOSE}", re.S)
+
+
+def _choices_in(bp: dict, expr: str) -> list[str]:
+    return [n for n in bp["variables"] if re.search(rf"\b{re.escape(n)}\b", expr)]
+
+
+def render(bp: dict, values: dict, marked: bool = False) -> str:
     """The spec text with every {{...}} replaced. A placeholder is a variable or simple arithmetic on variables
-    (the engine's safe rule language: no code runs); a result that is not whole is rounded down."""
+    (the engine's safe rule language: no code runs); a result that is not whole is rounded down. `marked` wraps
+    each value in marks that name its choice, for `shown` below."""
 
     def fill(match):
+        expr = match.group(1).strip()
         try:
-            value = evaluate(match.group(1).strip(), values)
+            value = evaluate(expr, values)
         except RuleError as e:
             raise BlueprintError(f"placeholder {match.group(0)}: {e}") from None
         if isinstance(value, float):
             value = math.floor(value)
-        return str(value)
+        names = _choices_in(bp, expr) if marked else []
+        return f"{_OPEN}{names[0]}{_SEP}{value}{_CLOSE}" if names else str(value)
 
     return PLACEHOLDER.sub(fill, bp["template"])
+
+
+def places(bp: dict) -> dict[str, int]:
+    """In how many places of the test each choice is used (the rules, their rewordings, the grading rule, the
+    near-miss records and so on)."""
+    counts = dict.fromkeys(bp["variables"], 0)
+    for expr in PLACEHOLDER.findall(bp["template"]):
+        for name in _choices_in(bp, expr):
+            counts[name] += 1
+    return counts
+
+
+def shown(bp: dict, values: dict) -> dict:
+    """What a model will be told with these values, as pieces: {"brief": [...], "rules": [...]}, each piece
+    {"text"} or, for a value that comes from a choice, {"text", "choice"}. So a page can point from each choice
+    to the words it changes."""
+
+    def pieces(text: str) -> list[dict]:
+        out, at = [], 0
+        for m in _MARKED.finditer(text):
+            if m.start() > at:
+                out.append({"text": text[at : m.start()]})
+            out.append({"text": m.group(2), "choice": m.group(1)})
+            at = m.end()
+        if at < len(text):
+            out.append({"text": text[at:]})
+        return out
+
+    try:
+        spec = yaml.safe_load(render(bp, values, marked=True))
+    except yaml.YAMLError:  # a template the marks do not survive: show the words without them
+        spec = yaml.safe_load(render(bp, values))
+    brief = " ".join(str(spec.get("brief", "")).split())
+    rules = " ".join(str((spec.get("task") or {}).get("policy_text", "")).split())
+    return {"brief": pieces(brief), "rules": pieces(rules)}
 
 
 def changed(bp: dict, values: dict) -> list[dict]:
@@ -200,6 +252,7 @@ def fork(
     root: Path = packages.ROOT,
     only_levels: list[str] | None = None,
     name: str | None = None,
+    on_level=None,
 ) -> dict:
     """Fork a challenge by choosing values for its open choices: check the values, render the spec, validate it
     automatically, and only then write a new sealed package, its validation record and a one-test suite.
@@ -219,7 +272,7 @@ def fork(
     text = render(bp, values)
     spec = yaml.safe_load(text)
     levels: dict = {}
-    found = validate(spec, only_levels=only_levels, report=levels)
+    found = validate(spec, only_levels=only_levels, report=levels, on_level=on_level)
     if found:
         return {"ok": False, "stage": "validation", "problems": found, "levels": levels, "changed": changed(bp, values)}
     version = new_version or "1.0.0"
@@ -268,6 +321,51 @@ def fork(
         "levels": levels,
         "written": {"test": rel(path.parent), "evidence": rel(evidence), "suite": rel(suite_path)},
     }
+
+
+ARCHIVE_NOTE = """\
+{ref}: a test of your own, forked from {source}.
+
+Unzip this at the top of a gladiator-core checkout (https://github.com/Loothore907/gladiator-core): the three
+folders here (challenges, validations, suites) go beside the ones already there.
+
+  uv run gladiator challenges                    # your test is listed, sealed and intact
+  uv run gladiator match --suite {suite} --a <provider:model> --b <provider:model> --max-usd 1
+
+The test is sealed: its fingerprint covers every file, so it cannot be edited without the engine noticing.
+To change a choice, fork it again with other values.
+"""
+
+
+def fork_archive(
+    pkg: packages.Package,
+    bp: dict,
+    new_id: str,
+    given: dict | None = None,
+    name: str | None = None,
+    only_levels: list[str] | None = None,
+    on_level=None,
+) -> tuple[dict, bytes | None]:
+    """Fork by choices without writing into the library: the result as `fork` gives it, and, when the test was
+    created, a zip of its files (the sealed package, its validation record and its suite, at the paths they have
+    in a checkout). For a server, where a person's test is theirs to take away and nothing is kept."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        rel = pkg.path.resolve().relative_to(packages.ROOT.resolve())
+        shutil.copytree(pkg.path, root / rel)
+        copy = dataclasses.replace(pkg, path=root / rel)
+        result = fork(copy, bp, new_id, None, given, root, only_levels, name=name, on_level=on_level)
+        if not result["ok"]:
+            return result, None
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED) as z:
+            for path in sorted(root.rglob("*")):
+                inside = path.relative_to(root).as_posix()
+                if path.is_file() and not inside.startswith(rel.as_posix() + "/"):  # not the copied source
+                    z.write(path, inside)
+            note = ARCHIVE_NOTE.format(ref=result["ref"], source=pkg.ref, suite=result["written"]["suite"])
+            z.writestr("README.txt", note)
+        return result, data.getvalue()
 
 
 # ------------------------------------------------------------------------------------------- describe, then match
