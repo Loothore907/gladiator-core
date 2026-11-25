@@ -26,6 +26,9 @@ conversation:
   GET  /fork/job?id=    how far the checks are, then what they found
   GET  /fork/download?id=   the created test as a zip (sealed package, validation record, suite)
 
+Started with a `Spaces` (engine/hosted.py; `gladiator serve --assistants`) it also hands /mcp, /api and
+/space/download to it: the same test builder for AI assistants and programs, each key with a private space.
+
 A description is the only free text, and it never reaches the engine: it is matched by its words and, for a
 signed-in visitor on a server with a reader, read by one model whose answers come back inside a schema built from
 the declared choices. A created test is the visitor's to take away: it is built in a temporary folder, handed over
@@ -923,14 +926,26 @@ PAGE_POLICY = (
 )
 
 
-def handler_for(races: Races, forks: Forks | None = None):
+def handler_for(races: Races, forks: Forks | None = None, spaces=None):
+    """`spaces`: the assistant connection (engine/hosted.py `Spaces`), which answers /mcp, /api and
+    /space/download itself. None: this runner does not offer it."""
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def log_message(self, fmt, *args):  # one short line per request; never the body (it carries the code)
-            path = self.path.split("?")[0]  # nor the query: an invitation link carries its invite there
+        def log_message(self, fmt, *args):
+            """One short line per request: the method, the path and the status. Never a body or a query (they
+            carry codes and invites), and never anything the server could not read as a request: only a known
+            method, a path of plain characters and a number are printed."""
+            command = self.command if self.command in ("GET", "POST", "DELETE", "OPTIONS", "HEAD") else "?"
+            path = str(getattr(self, "path", "") or "").split("?")[0]
+            if path.startswith("/mcp/"):
+                path = "/mcp/(key)"  # an assistant that can send no header carries its key in the address
+            if not re.fullmatch(r"/[A-Za-z0-9_.@()/-]{0,120}", path):
+                path = "(unreadable)"
+            status = next((str(a) for a in args[:2] if str(a).isdigit()), "")
             if path != "/fork/job":  # the page asks every second while a test is checked
-                runner.say(f"  [serve] {self.command} {path} {args[1] if len(args) > 1 else ''}")
+                runner.say(f"  [serve] {command} {path} {status}")
 
         def _cors(self):
             origin = self.headers.get("Origin")
@@ -968,9 +983,17 @@ def handler_for(races: Races, forks: Forks | None = None):
             self.end_headers()
             self.wfile.write(data)
 
+        def do_DELETE(self):  # an assistant closing its connection; nothing else is ever deleted here
+            path = self.path.split("?")[0]
+            if spaces and spaces.handles(path):
+                return spaces.answer(self, "DELETE")
+            self._json(404, {"error": "Not found."})
+
         def do_GET(self):
             path, _, query = self.path.partition("?")
             asked = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair)
+            if spaces and spaces.handles(path):
+                return spaces.answer(self, "GET")
             if path == "/options":
                 self._json(200, races.options())
             elif path == "/health":
@@ -1000,11 +1023,15 @@ def handler_for(races: Races, forks: Forks | None = None):
 
         def do_POST(self):
             path = self.path.split("?")[0]
+            if spaces and spaces.handles(path):
+                return spaces.answer(self, "POST")
             if path not in ("/race", "/signin") and not (forks and path in FORK_POSTS):
+                self.close_connection = True  # its body is not read: it must not be taken for the next request
                 return self._json(404, {"error": "Not found."})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 if not 0 < length <= MAX_BODY:
+                    self.close_connection = True  # its body is not read: it must not be taken for the next request
                     raise Refused(400, "Send a small JSON object.")
                 try:
                     ask = json.loads(self.rfile.read(length))
@@ -1099,7 +1126,7 @@ def handler_for(races: Races, forks: Forks | None = None):
     return Handler
 
 
-def serve(races: Races, host: str, port: int, forks: Forks | None = None) -> ThreadingHTTPServer:
+def serve(races: Races, host: str, port: int, forks: Forks | None = None, spaces=None) -> ThreadingHTTPServer:
     if races.codes is None and host not in ("127.0.0.1", "localhost", "::1"):
         raise SystemExit("Refusing to listen beyond this machine without access codes (set GLADIATOR_RACE_CODES).")
-    return ThreadingHTTPServer((host, port), handler_for(races, forks))
+    return ThreadingHTTPServer((host, port), handler_for(races, forks, spaces))

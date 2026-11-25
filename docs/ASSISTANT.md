@@ -106,5 +106,59 @@ look = designs.check("gladiator/refund-queue@2.3.0", {"refund_window_days": 30})
 made = designs.create("gladiator/refund-queue@2.3.0", {"refund_window_days": 30}, owner="acme", name="Returns desk")
 ```
 
-A hosted connection (the same calls behind an address, with a key for each organisation and a private place for
-its tests) is not built yet.
+## A hosted runner: the same calls behind an address
+
+A runner started with `gladiator serve --assistants` offers the same calls over the web, so nothing has to be
+installed. An assistant connects to it as an MCP server; a program calls it as plain JSON.
+
+**You need a key.** It is an organisation's own key, or an invitation code for that runner. A key opens one
+private space: the tests created with it are kept there, apart from the library and from every other key's
+space. One key cannot see, name or download another key's tests.
+
+### Connect an assistant
+
+Claude Code, with the key in a header (the better way: the key is not part of the address):
+
+```bash
+claude mcp add --transport http gladiator https://RUNNER/mcp --header "Authorization: Bearer YOUR-KEY"
+```
+
+A client whose settings take only an address can carry the key as the last part of it:
+`https://RUNNER/mcp/YOUR-KEY`. The address is then as secret as the key, and such a client shows it wherever it
+shows the address.
+
+Then ask as on your own machine. The differences from `gladiator mcp`:
+
+- A created test is kept in your space on the runner, and you get a **download link** that works for 20
+  minutes (`get_download_link` gives a fresh one any time). The download is the sealed test, its validation
+  record and a suite file; unzip it at the top of a gladiator-core checkout to run matches on it with your own
+  model keys.
+- `list_tests` also returns `yours`: the tests kept in your space, each with the test it was built from and
+  the values it was given.
+- Creating shares the runner with live races: one thing runs at a time, so a call can answer that the engine is
+  busy. A key may create a limited number of tests, and a space holds a limited number.
+
+The runner calls no model for any of this. Your assistant's own model does the reading.
+
+### Call it from a program
+
+`GET https://RUNNER/api` needs no key and returns every call with its values as a JSON Schema, and the rules
+an assistant is given. Each call is a `POST` with a JSON object:
+
+```bash
+curl -s https://RUNNER/api/read_requirements -H "Authorization: Bearer YOUR-KEY" \
+  -H "Content-Type: application/json" -d '{"test": "gladiator/refund-queue@2.3.0"}'
+
+curl -s https://RUNNER/api/create_test -H "Authorization: Bearer YOUR-KEY" -H "Content-Type: application/json" \
+  -d '{"test": "gladiator/refund-queue@2.3.0", "values": {"refund_cap": 250}, "owner": "acme", "name": "Returns desk"}'
+```
+
+The calls are `list_tests`, `read_requirements`, `check_design`, `create_test`, `get_result` and
+`get_download_link`: the same names, values and answers as the MCP tools, because both are served from the same
+definitions. A request the runner refuses is answered with a status and `{"error": "..."}`; a design the engine
+refuses is a normal answer that says what is wrong.
+
+### Not built yet
+
+Running a live match on a test in your space from the hosted runner. For now a test leaves the runner as a
+download and is run with your own keys.

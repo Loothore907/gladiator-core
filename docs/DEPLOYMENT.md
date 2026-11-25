@@ -68,6 +68,30 @@ The runner also serves one page of its own, `GET /build`: the conversation of `g
 - The page loads nothing from any other address and may only talk to the server it came from (a strict
   content-security policy). What the server answers is put on the page as text, never as markup.
 
+### The assistant connection (the same test builder for assistants and programs)
+
+`gladiator serve --assistants` also answers `/mcp` (MCP over HTTP, for an AI assistant) and `/api` (the same
+calls as plain JSON, for a program): `engine/hosted.py`, over the calls of `engine/assistant.py`. How a person
+connects: `docs/ASSISTANT.md`.
+
+- **Keys.** Every request carries one, as `Authorization: Bearer <key>` or as the last part of the address
+  (`/mcp/<key>`, for a client that can send no header). A key is an organisation's own (`GLADIATOR_API_KEYS`,
+  comma-separated `name:key` pairs, kept in the host's secret store like every other key) or one of the
+  runner's invites. `GET /api`, which only describes the calls, needs none.
+- **A private space for each key.** Tests a key creates are kept under `<state>/spaces/<space>/`, laid out like
+  a checkout. A space never joins the library. The space is worked out from the key on every request and is
+  never taken from the request, so one key cannot see, name or download another's tests. A test leaves its
+  space only through a signed link its owner asked for, which works for 20 minutes.
+- **No model, no spend.** The caller's own model does the reading; this server calls none. Creating a test runs
+  the full automatic validation, so it shares the one-thing-at-a-time rule with races and with the build page.
+  A key may create 30 tests and a space holds 50.
+- **MCP is the MCP library's own web app**, on an inner port of the machine that only the runner's process can
+  reach. The runner checks the key, then passes the request on with the caller's space; the inner app refuses
+  anyone else. No protocol is hand-made.
+- **The log** prints the method, the path and the status of a request, and nothing else: never a body, a query
+  or a key (a key carried in the address is printed as `/mcp/(key)`). A request is read in full before it is
+  refused, so a refused body cannot be mistaken for the next request.
+
 ## Rules for any hosted environment
 
 1. **One environment per purpose.** No parallel staging copies, preview environments or "campaign" layers

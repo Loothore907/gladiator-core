@@ -10,8 +10,10 @@ The assistant's own model does the reading, so this server never calls a model, 
 Everything that shapes a test is still one of the matched test's declared choices, checked by the engine
 (engine/blueprint.py) with the conversation code the terminal and the page use (engine/session.py).
 
-`Designs` is the adapter as plain data in and out: the five calls, with no transport in them, so an HTTP API or a
-hosted MCP endpoint can carry the same calls later. `build` puts them behind MCP.
+`Designs` is the adapter as plain data in and out: the calls, with no transport in them. `build` puts them behind
+MCP. On a person's own machine one `Designs` writes created tests into the checkout. On a hosted runner
+(engine/hosted.py) each organisation gets a `Designs` of its own whose tests go into that organisation's private
+space, and the same calls are served over HTTP, as MCP and as a plain JSON API.
 """
 
 import contextlib
@@ -55,7 +57,8 @@ Walk the person through this, in order:
    returned: that is what a model will be told. Get their yes before creating anything.
 5. create_test, then get_result while the state is "checking". The engine plays the test with a perfect player
    and with players that cut corners, and creates it only if the perfect player gets through and the
-   corner-cutters do not. Report `checked` as returned, where the files are, and `run_it`.
+   corner-cutters do not. Report `checked` as returned, how to get the test (its `files` on this machine, or
+   the `download` link when the server keeps it for them), and `run_it`.
 
 Rules that are not optional:
 - Everything that shapes the test is a declared choice. If the person's flow needs something no choice covers (a
@@ -82,25 +85,60 @@ def one_line(text) -> str:
 
 
 class Designs:
-    """The five calls an assistant makes, as plain data in and out. One instance serves one checkout: created
-    tests are written into it (`challenges/`, `validations/`, `suites/`), exactly as `gladiator fork` writes them.
+    """The calls an assistant makes, as plain data in and out. The library is always read from this checkout.
+
+    `space` is where created tests go. None: into the checkout itself (`challenges/`, `validations/`, `suites/`),
+    exactly as `gladiator fork` writes them. A folder: a private space laid out the same way that holds only its
+    owner's tests and never joins the library (a hosted runner gives each organisation one).
 
     A bad request is answered, not raised: `{"error": sentence}`, written for the person the assistant is
-    helping. `levels` limits validation to some difficulty levels (tests use it to stay quick)."""
+    helping. `levels` limits validation to some difficulty levels (tests use it to stay quick). For a host:
+    `busy` is a lock shared with whatever else must not run beside the checks; `allow()` is asked just before
+    the checks start and returns a sentence to refuse with (a limit reached) or None; `max_kept` is how many
+    tests the space may hold; `link(ref)` gives the address a test kept in the space can be downloaded from."""
 
-    def __init__(self, root: Path = packages.ROOT, levels: list[str] | None = None, wait_s: float = WAIT_S):
-        self.root, self.levels, self.wait_s = Path(root), levels, wait_s
+    def __init__(
+        self,
+        space: Path | None = None,
+        levels: list[str] | None = None,
+        wait_s: float = WAIT_S,
+        busy=None,
+        allow=None,
+        max_kept: int | None = None,
+        link=None,
+    ):
+        self.space = Path(space) if space else None
+        self.where = self.space or packages.ROOT  # the folder created tests are written under
+        self.levels, self.wait_s = levels, wait_s
+        self.allow, self.max_kept, self.link = allow, max_kept, link
         # tests already read from disk: the library's own tests do not change under a running server
         self.known: dict = {}
         self.adaptable: dict | None = None
         self.jobs: dict[str, dict] = {}
-        self.busy = threading.Lock()  # the checks use a whole processor: one test at a time
+        self.busy = busy or threading.Lock()  # the checks use a whole processor: one test at a time
 
     # ---- reading the library
     def _adaptable(self) -> dict[str, dict]:
         if self.adaptable is None:
-            self.adaptable = blueprint.library(self.root)
+            self.adaptable = blueprint.library()
         return self.adaptable
+
+    def _kept(self) -> list[dict]:
+        """The tests in this space, as an assistant is shown them."""
+        out = []
+        for m in blueprint.in_space(self.space) if self.space else []:
+            made = m.get("choices") or {}
+            out.append(
+                {
+                    "test": m["ref"],
+                    "name": m["name"],
+                    "what_it_tests": one_line(m.get("description")),
+                    "trust": "unreviewed",
+                    "built_from": made.get("of") or m.get("forked_from"),
+                    "with_values": made.get("values"),
+                }
+            )
+        return out
 
     def _talk(self, ref: str) -> tuple[session.ForkSession | None, dict | None]:
         """A conversation opened on one test, or what is wrong with the reference."""
@@ -113,7 +151,7 @@ class Designs:
             except packages.PackageError:
                 reason = "is not a test in this library (a reference looks like namespace/name@version)"
             return None, {"error": f"'{ref}' {reason}. Tests that can be adapted: {', '.join(can) or 'none'}."}
-        talk = session.ForkSession(self.root, known=self.known)
+        talk = session.ForkSession(known=self.known)
         talk.choose(ref)
         return talk, None
 
@@ -122,7 +160,7 @@ class Designs:
         words with it come first and say which words: a hint for the reader, never a match by itself."""
         can = self._adaptable()
         wanted = one_line(description)
-        hits = {m["ref"]: m for m in blueprint.find(wanted, self.root)} if wanted else {}
+        hits = {m["ref"]: m for m in blueprint.find(wanted)} if wanted else {}
         out = []
         for pkg in packages.catalog().values():
             if pkg.status.get("status") == "retired":
@@ -149,7 +187,10 @@ class Designs:
         )
         if wanted and not hits:
             note = "No test shares a word with that description. Read what each test is for before deciding. " + note
-        return {"tests": tests, "can_be_adapted": sum(t["can_be_adapted"] for t in tests), "note": note}
+        out = {"tests": tests, "can_be_adapted": sum(t["can_be_adapted"] for t in tests), "note": note}
+        if self.space:  # what this organisation has already built, kept apart from the library
+            out["yours"] = self._kept()
+        return out
 
     def requirements(self, ref: str) -> dict:
         """Everything needed to design a test from this one, in one answer."""
@@ -234,22 +275,30 @@ class Designs:
             problem = f"\"{folder}\" is the library's own name. File the test under the person's own name or team."
         elif not VERSION.match(version):
             problem = f"'{version}' is not a version. Versions look like 1.0.0."
-        elif (self.root / "challenges" / folder / label / version).exists():
-            have = sorted(p.name for p in (self.root / "challenges" / folder / label).iterdir() if p.is_dir())
+        elif (self.where / "challenges" / folder / label / version).exists():
+            have = sorted(p.name for p in (self.where / "challenges" / folder / label).iterdir() if p.is_dir())
             problem = (
                 f"{folder}/{label}@{version} already exists and a sealed test is never changed "
                 f"(versions here: {', '.join(have)}). Use a higher version, or another name."
             )
         if problem:
             return {"state": "refused", "stage": "name", "nothing_written": True, "problems": [problem]}
+        if self.space and self.max_kept and len(blueprint.in_space(self.space)) >= self.max_kept:
+            full = f"This space already holds {self.max_kept} tests, which is its limit."
+            return {"state": "refused", "stage": "space", "nothing_written": True, "problems": [full]}
         if not self.busy.acquire(blocking=False):
             running = next((k for k, j in self.jobs.items() if j["state"] == "checking"), None)
+            waiting = f"job {running}" if running else "a live race, or another organisation's test"
             return {
                 "state": "refused",
                 "stage": "busy",
                 "nothing_written": True,
-                "problems": [f"Another test is being checked (job {running}). Ask for its result first."],
+                "problems": [f"The engine is busy with something else ({waiting}). Try again in a minute."],
             }
+        said = self.allow() if self.allow else None
+        if said:
+            self.busy.release()
+            return {"state": "refused", "stage": "limit", "nothing_written": True, "problems": [said]}
         talk, _ = self._talk(ref)
         talk.fill(values)
         job_id = secrets.token_urlsafe(9)
@@ -262,14 +311,26 @@ class Designs:
         def work():
             try:
                 # the engine may print as it works; on stdio, standard output belongs to the protocol
+                new_id, shown_name = f"{folder}/{label}", one_line(name)[:60] or None
+
+                def on_level(level, number, of):
+                    job.update(level=level, number=number, of=of)
+
                 with contextlib.redirect_stdout(sys.stderr):
-                    result = talk.create(
-                        f"{folder}/{label}",
-                        one_line(name)[:60] or None,
-                        self.levels,
-                        version,
-                        lambda level, number, of: job.update(level=level, number=number, of=of),
-                    )
+                    if self.space:
+                        result = blueprint.fork_to(
+                            talk.pkg,
+                            talk.bp,
+                            new_id,
+                            self.space,
+                            version,
+                            talk.values,
+                            shown_name,
+                            self.levels,
+                            on_level,
+                        )
+                    else:
+                        result = talk.create(new_id, shown_name, self.levels, version, on_level)
                 if result["ok"]:
                     job.update(
                         state="created",
@@ -286,6 +347,14 @@ class Designs:
                             "--a <provider:model> --b <provider:model> --max-usd 1"
                         ),
                     )
+                    if self.space:
+                        job["kept"] = "in your private space on this server; it is not part of the public library"
+                        if self.link:
+                            job["download"] = self.link(result["ref"])
+                            job["get_it"] = (
+                                "Open the download link (it works for 20 minutes; get_download_link gives a fresh "
+                                "one), unzip it at the top of a gladiator-core checkout, then use run_it."
+                            )
                 else:
                     found = plain_problems(result.get("levels") or {}) or result["problems"]
                     job.update(state="refused", stage=result["stage"], nothing_written=True, problems=found)
@@ -298,6 +367,21 @@ class Designs:
 
         threading.Thread(target=work, daemon=True).start()
         return self.result(job_id)
+
+    def download(self, ref: str) -> dict:
+        """Where a test kept in this space can be downloaded from, for a short while."""
+        ref = str(ref or "").strip()
+        if not self.space or not self.link:
+            return {"error": "Tests created here are files in this checkout already; there is nothing to download."}
+        mine = [t["test"] for t in self._kept()]
+        if ref not in mine:
+            return {"error": f"'{ref}' is not one of your tests here. Yours: {', '.join(mine) or 'none yet'}."}
+        return {
+            "test": ref,
+            "download": self.link(ref),
+            "note": "The link works for 20 minutes. It holds the sealed test, its validation record and a suite "
+            "file, with a short note on where they go.",
+        }
 
     def result(self, job_id: str) -> dict:
         """What became of a test being created. Waits for the checks up to `wait_s`."""
@@ -313,14 +397,21 @@ class Designs:
         return out
 
 
-def build(designs: Designs | None = None):
-    """The MCP server over one `Designs`. The MCP library is imported here, so the engine's other commands do not
-    load it."""
+def build(designs: Designs | None = None, per_request=None):
+    """The MCP server. On a person's own machine it serves one `Designs` (stdio). On a host, `per_request` picks
+    the `Designs` for each call from the request's headers, so every organisation reaches only its own space.
+    The MCP library is imported here, so the engine's other commands do not load it."""
     import asyncio
 
-    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver import Context, MCPServer
 
-    designs = designs or Designs()
+    if not per_request:
+        designs = designs or Designs()
+    hosted = bool(per_request)
+
+    def the(ctx: Context) -> Designs:
+        return per_request(dict(ctx.headers or {})) if per_request else designs
+
     server = MCPServer(
         "gladiator",
         title="Gladiator: build a test for your own flow",
@@ -330,46 +421,56 @@ def build(designs: Designs | None = None):
     )
 
     @server.tool(title="List the library's tests, and which can be adapted")
-    def list_tests(description: str = "") -> dict[str, Any]:
+    def list_tests(ctx: Context, description: str = "") -> dict[str, Any]:
         """Every current test: what it tests, its trust status, and whether it declares open choices
         (`can_be_adapted`). Pass the person's `description` to put the tests that share words with it first
         (`shares_words`); that is a hint, and the judgement of "same kind of job" is yours. A test with
-        `built_from` is one somebody already made from a library test, with the values it was given."""
-        return designs.tests(description)
+        `built_from` is one already made from a library test, with the values it was given; `yours` lists the
+        tests kept for you on a hosted server."""
+        return the(ctx).tests(description)
 
     @server.tool(title="Read what a test needs: its job, its rules and every open choice")
-    def read_requirements(test: str) -> dict[str, Any]:
+    def read_requirements(ctx: Context, test: str) -> dict[str, Any]:
         """`test` is a reference such as gladiator/refund-queue@2.3.0 with can_be_adapted true. Returns the job
         and the rules a model is told (with the library's values), the tools the agent gets, every open choice
         (`ask`, type, unit, allowed range, the library's value), the rules between choices, a JSON Schema for
         `values`, and what is fixed and cannot be expressed."""
-        return designs.requirements(test)
+        return the(ctx).requirements(test)
 
     @server.tool(title="Check a design: values for a test's open choices")
-    def check_design(test: str, values: dict[str, Any]) -> dict[str, Any]:
+    def check_design(ctx: Context, test: str, values: dict[str, Any]) -> dict[str, Any]:
         """Checks without creating anything. `values` maps choice names to the person's values; leave a choice
         out to keep the library's value. Returns `ok`, what is wrong with each value (`problems`), which values
         do not fit together, which choices stay as the library has them, and, when ok, `the_rules` exactly as a
         model will be told them."""
-        return designs.check(test, values)
+        return the(ctx).check(test, values)
 
-    @server.tool(title="Create the test: validate it, seal it and write it")
+    @server.tool(title="Create the test: validate it, seal it and keep it")
     async def create_test(
-        test: str, values: dict[str, Any], owner: str, name: str, version: str = "1.0.0"
+        ctx: Context, test: str, values: dict[str, Any], owner: str, name: str, version: str = "1.0.0"
     ) -> dict[str, Any]:
         """Only after the person has seen the rules and said yes. `owner` is the person's name or team and `name`
         what they call the test: it is filed as owner/name@version. Runs the engine's automatic validation, then
-        writes the sealed test, its validation record and a one-test suite into this checkout. Nothing is written
-        unless validation passes. The checks take a minute or two: when the answer's state is "checking", call
-        get_result with its `job`."""
-        return await asyncio.to_thread(designs.create, test, values, owner, name, version)
+        writes the sealed test, its validation record and a one-test suite: into this checkout on a person's own
+        machine, into their private space on a hosted server. Nothing is written unless validation passes. The
+        checks take a minute or two: when the answer's state is "checking", call get_result with its `job`."""
+        return await asyncio.to_thread(the(ctx).create, test, values, owner, name, version)
 
     @server.tool(title="The result of a test being created")
-    async def get_result(job: str) -> dict[str, Any]:
-        """state is "checking" (ask again), "created" (the test's reference, what the checks found, the files
-        written and the command that runs a match on it), "refused" (the checks found a problem, or the design
+    async def get_result(ctx: Context, job: str) -> dict[str, Any]:
+        """state is "checking" (ask again), "created" (the test's reference, what the checks found, where the
+        test is and the command that runs a match on it), "refused" (the checks found a problem, or the design
         was not allowed; nothing was written) or "failed"."""
-        return await asyncio.to_thread(designs.result, job)
+        return await asyncio.to_thread(the(ctx).result, job)
+
+    if hosted:
+
+        @server.tool(title="A link to download one of your tests")
+        def get_download_link(ctx: Context, test: str) -> dict[str, Any]:
+            """`test` is the reference of a test kept for you here (see `yours` in list_tests). Returns a link
+            that works for 20 minutes: a zip of the sealed test, its validation record and its suite, to unzip
+            at the top of a gladiator-core checkout."""
+            return the(ctx).download(test)
 
     @server.prompt(title="Build a test for my flow")
     def build_a_test(flow: str = "") -> str:
