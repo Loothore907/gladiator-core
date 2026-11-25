@@ -21,10 +21,10 @@ Run these once, in PowerShell.
    Close and reopen PowerShell afterwards.
 3. **Get the code**, in a normal folder (not OneDrive or another synced folder):
    ```bash
-   git clone https://github.com/Loothore907/gladiator.git
+   git clone https://github.com/Loothore907/gladiator-core.git
    ```
    ```bash
-   cd gladiator
+   cd gladiator-core
    ```
 4. **Install everything.** uv downloads the right Python (3.12) and the exact package versions in `uv.lock`:
    ```bash
