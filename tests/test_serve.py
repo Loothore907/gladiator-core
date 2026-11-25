@@ -211,6 +211,14 @@ class HttpTests(unittest.TestCase):
         self.assertFalse(self.races.busy.locked())
         # the race is listed with its public facts, and a restarted server reads the same list back from disk
         listed = json.load(urllib.request.urlopen(f"{self.url}/races"))["races"]
+        # its sealed public record can be fetched as filed (so a results store can count it); nothing else can
+        fetched = json.load(urllib.request.urlopen(f"{self.url}/records/{body['run_id']}"))
+        self.assertEqual(fetched, final["record"])
+        self.assertNotIn("operator", [k for k in fetched if k != "body"])
+        for bad in ("nope", "..%2F..%2Fledger.json", body["run_id"] + "/operator.json", "20000101-000000-abcdef"):
+            with self.assertRaises(urllib.error.HTTPError) as missing:
+                urllib.request.urlopen(f"{self.url}/records/{bad}")
+            self.assertEqual(missing.exception.code, 404, bad)
         self.assertEqual(len(listed), 1)
         one = listed[0]
         self.assertEqual((one["run_id"], one["seal"], one["task"]), (body["run_id"], final["record"]["sha256"], task))
