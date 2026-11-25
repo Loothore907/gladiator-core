@@ -46,6 +46,7 @@ import hmac
 import json
 import math
 import queue
+import re
 import secrets
 import tempfile
 import threading
@@ -177,6 +178,7 @@ def is_batch(sealed: dict) -> bool:
     return int((sealed["body"].get("settings") or {}).get("repeats") or 1) > 1
 
 
+RUN_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{6}")  # the only shape a run id has: nothing else reaches the disk
 LIVE_LEVELS = ("easy", "standard")  # harder levels take too long and cost too much to watch live
 HEARTBEAT_S = 10  # hosts cut a stream that stays silent; a comment line keeps it open
 MAX_BODY = 8192  # a description of 1,200 characters, in any alphabet, with the rest of the request
@@ -458,6 +460,16 @@ class Races:
 
     def races_run(self) -> dict:
         return {"races": list(self.results), "batches": list(self.batches)}
+
+    def sealed_record(self, run_id: str) -> dict:
+        """The sealed public record of one live race or batch on file, exactly as filed: what a results store
+        needs to count it. Never the private half (the answer key of its generated worlds)."""
+        if not self.runs_dir or not RUN_ID.fullmatch(run_id or ""):
+            raise Refused(404, "No such record.")
+        path = Path(self.runs_dir) / run_id / "record.json"
+        if not path.is_file():
+            raise Refused(404, "No such record.")
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def health(self) -> dict:
         return {
@@ -930,6 +942,11 @@ def handler_for(races: Races, forks: Forks | None = None):
                 self._json(200, races.health())
             elif path == "/races":
                 self._json(200, races.races_run())
+            elif path.startswith("/records/"):  # one filed race, public half only
+                try:
+                    self._json(200, races.sealed_record(path[len("/records/") :]))
+                except Refused as no:
+                    self._json(no.status, {"error": no.reason})
             elif forks and path in STATIC:
                 name, content_type = STATIC[path]
                 self._bytes((PAGES / name).read_bytes(), content_type, {"Content-Security-Policy": PAGE_POLICY})
