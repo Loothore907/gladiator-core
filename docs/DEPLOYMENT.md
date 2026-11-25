@@ -1,6 +1,9 @@
-# Deployment (not active yet)
+# Deployment
 
-No hosting is set up. This file records the rules for when it is, so the v1 cloud problems don't repeat.
+One host is active: the race runner behind the Gladiator Ledger live demo (`gladiator serve`, described below),
+on Fly.io since 2026-11-24. It is deployed from the project's private operations repository, by commit id, with
+its keys in the host's secret store and its spending ledger and race records on a volume. Nothing else is hosted.
+This file records the rules any hosting follows, so the v1 cloud problems don't repeat.
 
 ## What gets deployed
 
@@ -109,6 +112,7 @@ connects: `docs/ASSISTANT.md`.
 ## When we pick a host: the switch-on checklist
 
 - [ ] Choose the target (a GitHub Actions scheduled job, a container service, or the customer's cluster).
+      For the race runner this is done: a container service (Fly.io).
 - [x] Image published by CI: every push to `main` that passes its checks is pushed to
       `ghcr.io/loothore907/gladiator-core`, tagged with its full commit id and `main` (the `publish` job).
       Deploy by commit id, never by `main`.

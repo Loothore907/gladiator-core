@@ -78,7 +78,7 @@ provider's reported token usage.
 ```
 gladiator.py          the command
 suites/               suite files (nodes + links), YAML or JSON
-challenges/           locked, versioned challenge packages (the 10 v1 cases are the first official ones)
+challenges/           locked, versioned challenge packages, and catalog.yaml: how far each is trusted, with the evidence
 blueprints/           the open choices of a challenge version (what a fork may change), beside the sealed package
 modules/              test types; v1_case.py (v1-simulator@1) runs the ten v1 simulators
 simulators/           the v1 case simulators, byte-for-byte, with SHA-256 pins (PINS.json)
