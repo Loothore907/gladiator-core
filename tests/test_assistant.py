@@ -3,7 +3,6 @@ the engine create the test, over MCP. The same rules as the page and the termina
 
 import asyncio
 import contextlib
-import dataclasses
 import io
 import shutil
 import sys
@@ -34,17 +33,12 @@ def call(server, name, arguments):
 
 
 class WithAThrowawayLibrary(unittest.TestCase):
-    """Created tests land in a throwaway folder, never in the repository."""
+    """Created tests land in a throwaway space, never in the repository."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        shutil.copytree(ROOT / "blueprints", self.tmp / "blueprints")
-        source = packages.resolve(REFUNDS)
-        rel = source.path.relative_to(packages.ROOT)
-        shutil.copytree(source.path, self.tmp / rel)
         self.designs = assistant.Designs(self.tmp, levels=["easy"])  # one light level keeps the checks to a moment
-        self.designs.known[REFUNDS] = (dataclasses.replace(source, path=self.tmp / rel), blueprint.load(REFUNDS))
         self.server = assistant.build(self.designs)
 
     def ask(self, tool, /, **arguments):

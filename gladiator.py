@@ -168,7 +168,17 @@ def cmd_serve(args):
             )
             reader = None
     forks = serve.Forks(races, reader, args.read_usd, open_create=args.open_create)
-    server = serve.serve(races, args.host, args.port, forks)
+    spaces, keys = None, {}
+    if args.assistants:  # the same test builder for assistants and programs: /mcp and /api, a private space per key
+        from engine import hosted
+
+        # GLADIATOR_API_KEYS: an organisation's own key, as name:key pairs, comma-separated. Invites work as keys too.
+        for entry in os.environ.get("GLADIATOR_API_KEYS", "").split(","):
+            name, _, key = entry.strip().partition(":")
+            if name and key:
+                keys[name] = key
+        spaces = hosted.Spaces(races, state, keys)
+    server = serve.serve(races, args.host, args.port, forks, spaces)
     who = f"{len(codes)} invite(s)" if codes else "no invites: this machine only"
     limit = f"${total:.2f} in total" if total is not None else "the provider budgets"
     per = "".join(
@@ -180,7 +190,13 @@ def cmd_serve(args):
         f"  tasks: {', '.join(races.tasks)}\n  models: {', '.join(models)}\n"
         f"  cap ${args.max_usd:.2f} per race, ${ledger.left():.2f} left of {limit}{per}{out}\n"
         f"  build page: /build  (descriptions read by {reader or 'nobody: matched by their words'}; "
-        f"creating open to {'everyone' if args.open_create else 'signed-in visitors'})",
+        f"creating open to {'everyone' if args.open_create else 'signed-in visitors'})"
+        + (
+            f"\n  assistants and programs: /mcp and /api  ({len(keys)} organisation key(s); invites work as keys; "
+            f"a private space for each under {state / 'spaces'})"
+            if spaces
+            else ""
+        ),
         flush=True,
     )
     try:
@@ -686,6 +702,12 @@ def main(argv=None):
         "--open-create",
         action="store_true",
         help="let anyone create a test on the build page (default: signed-in visitors only)",
+    )
+    sv.add_argument(
+        "--assistants",
+        action="store_true",
+        help="also serve the test builder to AI assistants (MCP at /mcp) and programs (JSON at /api): each key "
+        "(GLADIATOR_API_KEYS as name:key pairs, or an invite) gets a private space for the tests it creates",
     )
     sv.set_defaults(func=cmd_serve)
 

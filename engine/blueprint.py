@@ -16,6 +16,7 @@ grades, the wording the model reads, every rewording and the near-miss records. 
 only. The structure (tables, tools, outcomes, hazards) belongs to the blueprint and cannot be changed through it.
 """
 
+import contextlib
 import dataclasses
 import io
 import json
@@ -353,6 +354,33 @@ To change a choice, fork it again with other values.
 """
 
 
+@contextlib.contextmanager
+def _forked_apart(pkg, bp, new_id, new_version, given, name, only_levels, on_level):
+    """Fork by choices in a throwaway folder, so nothing is written into the library. Yields the result as `fork`
+    gives it and the files the fork wrote, as (path, its place in a checkout)."""
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        rel = pkg.path.resolve().relative_to(packages.ROOT.resolve())
+        shutil.copytree(pkg.path, root / rel)
+        copy = dataclasses.replace(pkg, path=root / rel)
+        result = fork(copy, bp, new_id, new_version, given, root, only_levels, name=name, on_level=on_level)
+        made = []
+        for path in sorted(root.rglob("*")):
+            inside = path.relative_to(root).as_posix()
+            if path.is_file() and not inside.startswith(rel.as_posix() + "/"):  # not the copied source
+                made.append((path, inside))
+        yield result, made
+
+
+def _zipped(files, ref: str, source: str, suite: str) -> bytes:
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED) as z:
+        for path, inside in files:
+            z.write(path, inside)
+        z.writestr("README.txt", ARCHIVE_NOTE.format(ref=ref, source=source, suite=suite))
+    return data.getvalue()
+
+
 def fork_archive(
     pkg: packages.Package,
     bp: dict,
@@ -365,23 +393,58 @@ def fork_archive(
     """Fork by choices without writing into the library: the result as `fork` gives it, and, when the test was
     created, a zip of its files (the sealed package, its validation record and its suite, at the paths they have
     in a checkout). For a server, where a person's test is theirs to take away and nothing is kept."""
-    with tempfile.TemporaryDirectory() as folder:
-        root = Path(folder)
-        rel = pkg.path.resolve().relative_to(packages.ROOT.resolve())
-        shutil.copytree(pkg.path, root / rel)
-        copy = dataclasses.replace(pkg, path=root / rel)
-        result = fork(copy, bp, new_id, None, given, root, only_levels, name=name, on_level=on_level)
+    with _forked_apart(pkg, bp, new_id, None, given, name, only_levels, on_level) as (result, made):
         if not result["ok"]:
             return result, None
-        data = io.BytesIO()
-        with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED) as z:
-            for path in sorted(root.rglob("*")):
-                inside = path.relative_to(root).as_posix()
-                if path.is_file() and not inside.startswith(rel.as_posix() + "/"):  # not the copied source
-                    z.write(path, inside)
-            note = ARCHIVE_NOTE.format(ref=result["ref"], source=pkg.ref, suite=result["written"]["suite"])
-            z.writestr("README.txt", note)
-        return result, data.getvalue()
+        return result, _zipped(made, result["ref"], pkg.ref, result["written"]["suite"])
+
+
+def fork_to(
+    pkg: packages.Package,
+    bp: dict,
+    new_id: str,
+    space: Path,
+    new_version: str | None = None,
+    given: dict | None = None,
+    name: str | None = None,
+    only_levels: list[str] | None = None,
+    on_level=None,
+) -> dict:
+    """Fork by choices into a space of its owner's: a folder laid out like a checkout (challenges/, validations/,
+    suites/) that holds only that owner's tests. The library is not written to and the space never joins it.
+    Returns what `fork` returns; nothing is written unless validation passed."""
+    with _forked_apart(pkg, bp, new_id, new_version, given, name, only_levels, on_level) as (result, made):
+        if result["ok"]:
+            for path, inside in made:
+                target = Path(space) / inside
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, target)
+        return result
+
+
+def in_space(space: Path) -> list[dict]:
+    """The tests kept in a space, as their manifests (each with its `ref`), oldest name first."""
+    out = []
+    for path in sorted(Path(space).glob(f"challenges/*/*/*/{packages.MANIFEST}")):
+        manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
+        out.append({**manifest, "ref": f"{manifest['id']}@{manifest['version']}"})
+    return out
+
+
+def archive(space: Path, ref: str) -> bytes | None:
+    """One test kept in a space, as the zip `fork_archive` makes: the sealed package, its validation record and
+    its suite. None if the space holds no such test."""
+    kept = next((m for m in in_space(space) if m["ref"] == ref), None)
+    if not kept:
+        return None
+    space = Path(space)
+    folder = space / "challenges" / kept["id"] / kept["version"]
+    suite = f"suites/{kept['id'].replace('/', '-')}-{kept['version']}.yaml"
+    files = [(p, p.relative_to(space).as_posix()) for p in sorted(folder.rglob("*")) if p.is_file()]
+    for inside in (f"validations/{ref}.json", suite):
+        if (space / inside).is_file():
+            files.append((space / inside, inside))
+    return _zipped(files, ref, kept.get("forked_from") or "a library test", suite)
 
 
 # ------------------------------------------------------------------------------------------- describe, then match

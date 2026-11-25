@@ -923,12 +923,17 @@ PAGE_POLICY = (
 )
 
 
-def handler_for(races: Races, forks: Forks | None = None):
+def handler_for(races: Races, forks: Forks | None = None, spaces=None):
+    """`spaces`: the assistant connection (engine/hosted.py `Spaces`), which answers /mcp, /api and
+    /space/download itself. None: this runner does not offer it."""
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def log_message(self, fmt, *args):  # one short line per request; never the body (it carries the code)
             path = self.path.split("?")[0]  # nor the query: an invitation link carries its invite there
+            if path.startswith("/mcp/"):
+                path = "/mcp/(key)"  # an assistant that can send no header carries its key in the address
             if path != "/fork/job":  # the page asks every second while a test is checked
                 runner.say(f"  [serve] {self.command} {path} {args[1] if len(args) > 1 else ''}")
 
@@ -968,9 +973,17 @@ def handler_for(races: Races, forks: Forks | None = None):
             self.end_headers()
             self.wfile.write(data)
 
+        def do_DELETE(self):  # an assistant closing its connection; nothing else is ever deleted here
+            path = self.path.split("?")[0]
+            if spaces and spaces.handles(path):
+                return spaces.answer(self, "DELETE")
+            self._json(404, {"error": "Not found."})
+
         def do_GET(self):
             path, _, query = self.path.partition("?")
             asked = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair)
+            if spaces and spaces.handles(path):
+                return spaces.answer(self, "GET")
             if path == "/options":
                 self._json(200, races.options())
             elif path == "/health":
@@ -1000,6 +1013,8 @@ def handler_for(races: Races, forks: Forks | None = None):
 
         def do_POST(self):
             path = self.path.split("?")[0]
+            if spaces and spaces.handles(path):
+                return spaces.answer(self, "POST")
             if path not in ("/race", "/signin") and not (forks and path in FORK_POSTS):
                 return self._json(404, {"error": "Not found."})
             try:
@@ -1099,7 +1114,7 @@ def handler_for(races: Races, forks: Forks | None = None):
     return Handler
 
 
-def serve(races: Races, host: str, port: int, forks: Forks | None = None) -> ThreadingHTTPServer:
+def serve(races: Races, host: str, port: int, forks: Forks | None = None, spaces=None) -> ThreadingHTTPServer:
     if races.codes is None and host not in ("127.0.0.1", "localhost", "::1"):
         raise SystemExit("Refusing to listen beyond this machine without access codes (set GLADIATOR_RACE_CODES).")
-    return ThreadingHTTPServer((host, port), handler_for(races, forks))
+    return ThreadingHTTPServer((host, port), handler_for(races, forks, spaces))
