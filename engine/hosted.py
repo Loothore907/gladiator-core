@@ -254,11 +254,17 @@ def _answer(spaces: Spaces, handler, method: str) -> None:
         local = host.split(":")[0] in ("127.0.0.1", "localhost")
         spaces.base = f"{handler.headers.get('X-Forwarded-Proto') or ('http' if local else 'https')}://{host}"
 
-    def body(limit: int) -> bytes:
+    # The body is read before anything is decided. A request refused with its body unread would leave that body
+    # on the connection, where it is taken for the next request and ends up in the log.
+    limit = MAX_MCP_BODY if path.startswith("/mcp") else MAX_API_BODY
+    try:
         length = int(handler.headers.get("Content-Length") or 0)
-        if length > limit:
-            raise Refused(413, "That request is too large.")
-        return handler.rfile.read(length) if length > 0 else b""
+    except ValueError:
+        length = -1
+    if length < 0 or length > limit or handler.headers.get("Transfer-Encoding"):
+        handler.close_connection = True
+        return handler._json(413, {"error": "That request is too large, or does not say how long it is."})
+    raw = handler.rfile.read(length) if length else b""
 
     def key() -> str:
         said = handler.headers.get("Authorization") or ""
@@ -279,13 +285,13 @@ def _answer(spaces: Spaces, handler, method: str) -> None:
         if path.startswith("/api/") and method == "POST":
             space = space_for(key())
             try:
-                ask = json.loads(body(MAX_API_BODY) or b"{}")
+                ask = json.loads(raw or b"{}")
             except ValueError:
                 raise Refused(400, "That is not JSON.") from None
             return handler._json(200, spaces.call(space, path[5:], ask))
         if path == "/mcp" or path.startswith("/mcp/"):
             space = space_for(path[5:] or key())  # the key in the address, for a client that can send no header
-            status, back, data = spaces.forward(method, handler.headers, body(MAX_MCP_BODY), space)
+            status, back, data = spaces.forward(method, handler.headers, raw, space)
             handler.send_response(status)
             for name, value in back.items():
                 handler.send_header(name, value)

@@ -930,12 +930,19 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def log_message(self, fmt, *args):  # one short line per request; never the body (it carries the code)
-            path = self.path.split("?")[0]  # nor the query: an invitation link carries its invite there
+        def log_message(self, fmt, *args):
+            """One short line per request: the method, the path and the status. Never a body or a query (they
+            carry codes and invites), and never anything the server could not read as a request: only a known
+            method, a path of plain characters and a number are printed."""
+            command = self.command if self.command in ("GET", "POST", "DELETE", "OPTIONS", "HEAD") else "?"
+            path = str(getattr(self, "path", "") or "").split("?")[0]
             if path.startswith("/mcp/"):
                 path = "/mcp/(key)"  # an assistant that can send no header carries its key in the address
+            if not re.fullmatch(r"/[A-Za-z0-9_.@()/-]{0,120}", path):
+                path = "(unreadable)"
+            status = next((str(a) for a in args[:2] if str(a).isdigit()), "")
             if path != "/fork/job":  # the page asks every second while a test is checked
-                runner.say(f"  [serve] {self.command} {path} {args[1] if len(args) > 1 else ''}")
+                runner.say(f"  [serve] {command} {path} {status}")
 
         def _cors(self):
             origin = self.headers.get("Origin")
@@ -1016,10 +1023,12 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
             if spaces and spaces.handles(path):
                 return spaces.answer(self, "POST")
             if path not in ("/race", "/signin") and not (forks and path in FORK_POSTS):
+                self.close_connection = True  # its body is not read: it must not be taken for the next request
                 return self._json(404, {"error": "Not found."})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 if not 0 < length <= MAX_BODY:
+                    self.close_connection = True  # its body is not read: it must not be taken for the next request
                     raise Refused(400, "Send a small JSON object.")
                 try:
                     ask = json.loads(self.rfile.read(length))
