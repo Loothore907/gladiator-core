@@ -26,6 +26,9 @@ conversation:
   GET  /fork/job?id=    how far the checks are, then what they found
   GET  /fork/download?id=   the created test as a zip (sealed package, validation record, suite)
 
+Started with a `Spaces` (engine/hosted.py; `gladiator serve --assistants`) it also hands /mcp, /api and
+/space/download to it: the same test builder for AI assistants and programs, each key with a private space.
+
 A description is the only free text, and it never reaches the engine: it is matched by its words and, for a
 signed-in visitor on a server with a reader, read by one model whose answers come back inside a schema built from
 the declared choices. A created test is the visitor's to take away: it is built in a temporary folder, handed over

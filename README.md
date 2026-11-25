@@ -133,7 +133,9 @@ Dockerfile            the Linux container
   model and needs no key). Your assistant reads what a library test needs (every open choice with its range, the
   rules between choices, what the test cannot express), collects your values in whatever way suits you, checks
   the design and has the engine create the test. The same rules hold: declared choices only, and nothing is
-  written unless validation passes. How to connect it: `docs/ASSISTANT.md`.
+  written unless validation passes. How to connect it: `docs/ASSISTANT.md`. A hosted runner
+  (`gladiator serve --assistants`) offers the same calls behind an address, to assistants over MCP and to
+  programs as plain JSON, with a key for each organisation and a private space for the tests it creates.
 - `uv run gladiator validate <namespace/name@version>` checks a `workflow@1` challenge automatically: an
   oracle player must pass it and a set of deliberately bad players must fail it, at every difficulty.
 - A **test type** is the engine code that runs a kind of challenge (`modules/`, registered in
