@@ -157,6 +157,7 @@ def cmd_serve(args):
         batch_usd_per_run=args.batch_usd_per_run,
         batch_parallel=args.batch_parallel,
         batch_pass_rate=args.batch_pass_rate,
+        after_race=args.after_race_workflow,
     )
     reader = args.reader
     if reader:  # the model that reads a signed-in visitor's description on the build page
@@ -657,6 +658,12 @@ def main(argv=None):
         help="a batch's hard cap is this much times its runs (default 0.06, half per model)",
     )
     sv.add_argument("--batch-parallel", type=int, default=5, help="attempts each side of a batch plays at once")
+    sv.add_argument(
+        "--after-race-workflow",
+        metavar="OWNER/REPO/FILE.yml",
+        help="a GitHub workflow to start after each race is filed, so its record is imported at once "
+        "(needs GLADIATOR_GITHUB_TOKEN with permission to start that workflow)",
+    )
     sv.add_argument(
         "--batch-pass-rate",
         type=float,
