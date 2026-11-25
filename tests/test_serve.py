@@ -128,6 +128,39 @@ class RulesTests(unittest.TestCase):
             self.assertNotIn("judge-1", written)
             self.assertNotIn(signature, written)
 
+    def test_after_a_race_the_import_workflow_is_started_and_a_failure_never_breaks_anything(self):
+        with TemporaryDirectory() as tmp:
+            races = make(tmp)
+            races.after_race = "someone/results/import-live.yml"
+            sent = []
+
+            class Reply:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+            def fake(request, timeout):
+                sent.append(request)
+                return Reply()
+
+            with mock.patch("builtins.print"), mock.patch("urllib.request.urlopen", fake):
+                with mock.patch.dict("os.environ", {"GLADIATOR_GITHUB_TOKEN": ""}):
+                    self.assertFalse(races.announce_filed())  # no token: said, not raised, and nothing is sent
+                self.assertEqual(sent, [])
+                with mock.patch.dict("os.environ", {"GLADIATOR_GITHUB_TOKEN": "t0ken"}):
+                    self.assertTrue(races.announce_filed())
+            self.assertEqual(
+                sent[0].full_url,
+                "https://api.github.com/repos/someone/results/actions/workflows/import-live.yml/dispatches",
+            )
+            self.assertEqual((sent[0].get_method(), json.loads(sent[0].data)), ("POST", {"ref": "main"}))
+            self.assertEqual(sent[0].get_header("Authorization"), "Bearer t0ken")
+            with mock.patch("builtins.print"), mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
+                with mock.patch.dict("os.environ", {"GLADIATOR_GITHUB_TOKEN": "t0ken"}):
+                    self.assertFalse(races.announce_filed())
+
     def test_it_will_not_start_if_it_cannot_record_what_it_spends(self):
         with TemporaryDirectory() as tmp:
             blocker = Path(tmp) / "a-file"

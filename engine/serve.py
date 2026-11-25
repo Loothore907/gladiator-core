@@ -45,12 +45,14 @@ import hashlib
 import hmac
 import json
 import math
+import os
 import queue
 import re
 import secrets
 import tempfile
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -337,7 +339,11 @@ class Races:
         batch_usd_per_run: float = 0.06,
         batch_parallel: int = 5,
         batch_pass_rate: float = 0.8,
+        after_race: str | None = None,
     ):
+        # After a race is filed, a GitHub workflow can be started (owner/repo/workflow-file) so a results store
+        # imports the new record at once instead of on its next timed run. Needs GLADIATOR_GITHUB_TOKEN.
+        self.after_race = after_race
         # Early stop: a batch ends once a model has failed so often that it can no longer pass this share of the
         # scenarios asked for. The question is answered, and the rest of the money is not spent.
         self.batch_pass_rate = float(batch_pass_rate)
@@ -460,6 +466,33 @@ class Races:
 
     def races_run(self) -> dict:
         return {"races": list(self.results), "batches": list(self.batches)}
+
+    def announce_filed(self) -> bool:
+        """Start the configured workflow, so the new record is imported now. Never fails a race: a results store
+        that is not told still finds the record on its next timed import."""
+        token = os.environ.get("GLADIATOR_GITHUB_TOKEN", "")
+        try:
+            owner, repo, workflow = self.after_race.split("/")
+            if not token:
+                raise ValueError("GLADIATOR_GITHUB_TOKEN is not set")
+            request = urllib.request.Request(
+                f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
+                data=json.dumps({"ref": "main"}).encode(),
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "Content-Type": "application/json",
+                    "User-Agent": "gladiator-runner",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=20):
+                pass
+            runner.say(f"  [serve] asked {owner}/{repo} to import the new record")
+            return True
+        except Exception as e:  # noqa: BLE001  the race is filed either way; say why the import was not started
+            runner.say(f"  [serve] could not start the import after the race: {type(e).__name__}: {str(e)[:200]}")
+            return False
 
     def sealed_record(self, run_id: str) -> dict:
         """The sealed public record of one live race or batch on file, exactly as filed: what a results store
@@ -616,6 +649,8 @@ class Races:
                 self.batches.append(batch_summary(sealed))
             else:
                 self.results.append(summary(sealed))
+            if self.after_race and self.runs_dir and ask["a"] != ask["b"]:
+                threading.Thread(target=self.announce_filed, daemon=True).start()
             return sealed, operator
         finally:
             self.ledger.settle(cap, spent, tuple(sides.values()), spent_by)
