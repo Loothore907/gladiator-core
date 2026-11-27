@@ -48,6 +48,12 @@ uv run python gladiator.py serve                      # this machine only, your 
   changing the invites signs everyone out. The ledger file records a sign-in by an id, never the invite.
 - `GET /races` lists the live races it has run (record id and seal, task, the two models, who won, who passed,
   what each cost), read back from the sealed records on disk, so a restart forgets none. Public facts only.
+- `GET /records/<run_id>` hands out one filed race's sealed public record, exactly as filed.
+  `GET /records/<run_id>/operator` hands out its private half, the answer key of its generated worlds, so
+  anyone can re-grade a finished race (owner, 2026-11-27). Two rules, checked on every request: every test in
+  the record generates a fresh world for each attempt (the answers are spent the moment the race ends; the
+  answer key of a fixed test never leaves the server), and the file matches the fingerprint in the sealed
+  record. A record is on file only once its race is over.
 - A browser page on another address must be named with `--origin`.
 
 ### The build page (a test for your own flow)
@@ -118,5 +124,6 @@ connects: `docs/ASSISTANT.md`.
       Deploy by commit id, never by `main`.
 - [ ] Put the keys in the host's secret store; set provider-side spend limits.
 - [ ] Decide where `runs/` lives (bucket or volume) and who can read `operator.json` (it contains the
-      private answer-side data).
+      private answer-side data). For the race runner this is decided: a volume, and the runner itself hands
+      out the answer key of a finished race on generated worlds (`/records/<run_id>/operator`, above).
 - [ ] Run the live smoke test against the deployed image.

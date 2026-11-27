@@ -174,6 +174,55 @@ class RulesTests(unittest.TestCase):
             serve.serve(make(tmp), "0.0.0.0", 0)
 
 
+class AnswerKeyTests(unittest.TestCase):
+    """A finished race's answer key (owner, 2026-11-27): handed out for generated worlds only, and only as sealed."""
+
+    SMALL = str(Path(__file__).resolve().parent.parent / "suites" / "small_tier.yaml")
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        ledger = serve.Ledger(Path(self.tmp.name) / "ledger.json", 1.0, 3)
+        players = ["scripted:silent", "scripted:invalid"]  # they play no test well, and every test all the same
+        self.races = serve.Races(self.SMALL, players, ledger, 0.2, None, set(), runs_dir=Path(self.tmp.name) / "runs")
+        self.server = serve.serve(self.races, "127.0.0.1", 0)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        with mock.patch("builtins.print"):
+            ask = {"task": next(iter(self.races.tasks)), "a": players[0], "b": players[1]}
+            self.sealed, self.operator = self.races.run(ask, lambda event: None)
+        self.run_id = self.sealed["body"]["run_id"]
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.tmp.cleanup()
+
+    def test_the_answer_key_of_a_finished_race_on_generated_worlds_can_be_fetched_and_matches_its_record(self):
+        results = [r for side in self.sealed["body"]["contestants"].values() for r in side["results"]]
+        self.assertEqual({r["challenge"]["instances"] for r in results}, {"generator"})
+        fetched = json.load(urllib.request.urlopen(f"{self.url}/records/{self.run_id}/operator"))
+        self.assertEqual(record.sha256(fetched), self.sealed["body"]["operator_sha256"])
+        self.assertEqual(record.sha256(fetched), record.sha256(self.operator))
+        # the public record is still served as filed, and holds none of it
+        public = json.load(urllib.request.urlopen(f"{self.url}/records/{self.run_id}"))
+        self.assertEqual((public["sha256"], record.sha256(public["body"])), (self.sealed["sha256"],) * 2)
+        self.assertNotIn("native_record", json.dumps(public))
+
+    def test_an_answer_key_that_is_not_the_one_sealed_is_never_handed_out(self):
+        path = Path(self.tmp.name) / "runs" / self.run_id / "operator.json"
+        kept = path.read_text(encoding="utf-8")
+        for content in ('{"A": [], "B": []}', "{}"):
+            path.write_text(content, encoding="utf-8")
+            with self.assertRaises(urllib.error.HTTPError) as refused:
+                urllib.request.urlopen(f"{self.url}/records/{self.run_id}/operator")
+            self.assertEqual(refused.exception.code, 404)
+        path.unlink()
+        with self.assertRaises(serve.Refused):
+            self.races.answer_key(self.run_id)
+        path.write_text(kept, encoding="utf-8")
+        self.assertEqual(record.sha256(self.races.answer_key(self.run_id)), self.sealed["body"]["operator_sha256"])
+
+
 class HttpTests(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
@@ -252,6 +301,12 @@ class HttpTests(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as missing:
                 urllib.request.urlopen(f"{self.url}/records/{bad}")
             self.assertEqual(missing.exception.code, 404, bad)
+        # these are fixed tests (the same case every time): their answer key is on file and never handed out
+        self.assertTrue((Path(self.tmp.name) / "runs" / body["run_id"] / "operator.json").exists())
+        for bad in (body["run_id"], "nope", "20000101-000000-abcdef", "..%2F" + body["run_id"]):
+            with self.assertRaises(urllib.error.HTTPError) as kept:
+                urllib.request.urlopen(f"{self.url}/records/{bad}/operator")
+            self.assertEqual(kept.exception.code, 404, bad)
         self.assertEqual(len(listed), 1)
         one = listed[0]
         self.assertEqual((one["run_id"], one["seal"], one["task"]), (body["run_id"], final["record"]["sha256"], task))
