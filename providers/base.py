@@ -129,6 +129,12 @@ class FatalProviderError(RuntimeError):
     """Problems that will not fix themselves (bad key, unknown model). Stops that contestant."""
 
 
+class PriceUnavailable(ValueError):
+    """A price that is read from a provider's public list cannot be read right now: the list did not answer, or
+    does not name the model. Unlike a model that can never be priced (not in the price table, a floating alias,
+    no tool calling), this can pass: a server that stays up may ask again instead of refusing to start."""
+
+
 class ProviderError(RuntimeError):
     """A single failed call. Ends the current case for that contestant."""
 

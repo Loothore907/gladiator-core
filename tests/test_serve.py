@@ -63,9 +63,103 @@ class RulesTests(unittest.TestCase):
             with self.assertRaises(serve.Refused) as over:  # 0.25 is free, 0.3 does not fit
                 ledger.hold(0.3, "b")
             self.assertEqual(over.exception.status, 402)
-            # the total survives a restart; a hold from a run that died with the server does not
+            # The total survives a restart, and so does the hold of the race that was running when the server
+            # stopped: nobody knows what it cost, so its whole cap is counted, as for a match that dies.
             again = serve.Ledger(Path(tmp) / "l.json", total_usd=0.5, runs_per_code=2)
-            self.assertAlmostEqual(again.left(), 0.45)
+            self.assertAlmostEqual(again.left(), 0.25)
+            self.assertEqual(again.recovered, (1, 0.2))
+            self.assertEqual((again.state["held_usd"], again.state["open"], again.state["races"]), (0.0, [], 2))
+            # and it is counted once: the next start finds nothing in flight
+            third_start = serve.Ledger(Path(tmp) / "l.json", total_usd=0.5, runs_per_code=2)
+            self.assertAlmostEqual(third_start.left(), 0.25)
+            self.assertEqual(third_start.recovered, (0, 0.0))
+
+    def test_a_stop_in_the_middle_of_a_race_never_hands_money_back_to_a_budget(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "l.json"
+            budgets = {"openai": 1.0, "google": 1.0, "anthropic": 1.0}
+            ledger = serve.Ledger(path, None, 5, by_provider=budgets)
+            ledger.hold(0.4, "judges", ("openai", "google"))  # a race between two providers, in flight
+            ledger.hold_small(0.01, "anthropic")  # and a model reading a description
+            self.assertEqual([h["kind"] for h in ledger.state["open"]], ["race", "read"])
+            self.assertAlmostEqual(ledger.left_for("openai"), 0.6)
+            # the process stops here: nothing is settled. The next start counts both holds in full, the race's
+            # split over its two providers exactly as a match that died in a living server is.
+            again = serve.Ledger(path, None, 5, by_provider=budgets)
+            self.assertEqual(again.recovered, (2, 0.41))
+            self.assertAlmostEqual(again.left_for("openai"), 0.8)
+            self.assertAlmostEqual(again.left_for("google"), 0.8)
+            self.assertAlmostEqual(again.left_for("anthropic"), 0.99)
+            self.assertAlmostEqual(again.state["spent_usd"], 0.41)
+            self.assertEqual((again.state["held_usd"], again.state["open"]), (0.0, []))
+            # a race that ends normally leaves nothing open, so a restart after it counts nothing
+            again.hold(0.4, "judges", ("openai", "google"))
+            again.settle(0.4, 0.03, ("openai", "google"), {"openai": 0.01, "google": 0.02})
+            self.assertEqual(again.state["open"], [])
+            after = serve.Ledger(path, None, 5, by_provider=budgets)
+            self.assertEqual(after.recovered, (0, 0.0))
+            self.assertAlmostEqual(after.left_for("google"), 0.78)
+            # a ledger written before holds were listed: what it still holds is counted the same way
+            old = json.loads(path.read_text())
+            old.pop("open")
+            old["held_usd"] = 0.4
+            old["providers"]["openai"]["held_usd"] = 0.4
+            path.write_text(json.dumps(old))
+            before = after.left_for("openai")
+            from_old = serve.Ledger(path, None, 5, by_provider=budgets)
+            self.assertEqual(from_old.recovered, (1, 0.4))
+            self.assertAlmostEqual(from_old.left_for("openai"), before - 0.4)
+
+    def test_the_ledger_is_never_left_half_written_and_an_unreadable_one_stops_the_start(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "l.json"
+            ledger = serve.Ledger(path, total_usd=1.0, runs_per_code=5)
+            ledger.hold(0.2, "a")
+            ledger.settle(0.2, 0.05)
+            whole = path.read_text()
+            # the write that is cut off: the new text never replaces the old file
+            with mock.patch("os.replace", side_effect=OSError("the machine stopped")), self.assertRaises(OSError):
+                ledger.hold(0.2, "a")
+            self.assertEqual(path.read_text(), whole)
+            self.assertAlmostEqual(serve.Ledger(path, total_usd=1.0, runs_per_code=5).left(), 0.95)
+            # a file that cannot be read is not taken for an empty one: that would hand every limit back
+            path.write_text(whole[: len(whole) // 2])
+            with self.assertRaises(SystemExit) as stopped:
+                serve.Ledger(path, total_usd=1.0, runs_per_code=5)
+            self.assertIn("cannot be read", str(stopped.exception))
+
+    def test_a_price_list_that_does_not_answer_leaves_its_models_out_and_the_rest_are_offered(self):
+        from providers.base import PriceUnavailable
+
+        listed = {"up": False}
+
+        def price(provider, model, today=None):
+            if provider == "openrouter" and not listed["up"]:
+                raise PriceUnavailable("OpenRouter's model list could not be read (URLError).")
+            if model == "no-such-model":
+                raise ValueError("No price for scripted:no-such-model.")
+            return {"input": 1.0, "output": 1.0}
+
+        with TemporaryDirectory() as tmp, mock.patch.object(serve, "price_for", price), mock.patch("builtins.print"):
+            ledger = serve.Ledger(Path(tmp) / "l.json", 1.0, 3)
+            wanted = [MODELS[0], "openrouter:some/model", MODELS[1]]
+            with mock.patch.object(serve.Races, "_keep_pricing"):  # asked again by hand below
+                races = serve.Races(SIX, wanted, ledger, 0.2, {"judge-1"}, set(), runs_dir=Path(tmp) / "runs")
+            options = races.options()
+            self.assertEqual(options["models"], [MODELS[0], MODELS[1]])
+            self.assertEqual(options["models_unpriced"], ["openrouter:some/model"])
+            task = next(iter(races.tasks))
+            with self.assertRaises(serve.Refused):  # a model without a price cannot be raced
+                races.check({"task": task, "a": MODELS[0], "b": "openrouter:some/model", "code": "judge-1"})
+            # the list answers again: the model is offered, in the place it was named in
+            listed["up"] = True
+            with mock.patch("providers.openrouter_api.refresh_catalog"), mock.patch.object(serve.time, "sleep"):
+                races._keep_pricing()
+            self.assertEqual(races.options()["models"], wanted)
+            self.assertEqual(races.options()["models_unpriced"], [])
+            # a model that can never be priced is a mistake in how the server was started: it still refuses
+            with self.assertRaises(ValueError):
+                serve.Races(SIX, [*MODELS, "scripted:no-such-model"], ledger, 0.2, None, set())
 
     def test_each_provider_has_its_own_budget_and_a_spent_one_takes_its_models_off_the_list(self):
         with TemporaryDirectory() as tmp:
@@ -208,6 +302,15 @@ class AnswerKeyTests(unittest.TestCase):
         self.assertEqual((public["sha256"], record.sha256(public["body"])), (self.sealed["sha256"],) * 2)
         self.assertNotIn("native_record", json.dumps(public))
 
+    def test_the_viewer_of_a_race_on_generated_worlds_is_handed_its_answer_key_with_the_record(self):
+        ask = {"task": next(iter(self.races.tasks)), "a": "scripted:silent", "b": "scripted:invalid"}
+        request = urllib.request.Request(f"{self.url}/race", json.dumps(ask).encode(), {"Content-Type": "text/json"})
+        with mock.patch("builtins.print"):
+            last = urllib.request.urlopen(request, timeout=120).read().decode().strip().split("\n\n")[-1]
+        self.assertTrue(last.startswith("event: record\n"))
+        final = json.loads(last.split("data: ", 1)[1])
+        self.assertEqual(record.sha256(final["operator"]), final["record"]["body"]["operator_sha256"])
+
     def test_an_answer_key_that_is_not_the_one_sealed_is_never_handed_out(self):
         path = Path(self.tmp.name) / "runs" / self.run_id / "operator.json"
         kept = path.read_text(encoding="utf-8")
@@ -248,7 +351,23 @@ class HttpTests(unittest.TestCase):
         options = json.load(urllib.request.urlopen(f"{self.url}/options"))
         self.assertEqual(options["models"], MODELS)
         self.assertTrue(options["needs_code"] and options["tasks"])
-        self.assertEqual(json.load(urllib.request.urlopen(f"{self.url}/health"))["busy"], False)
+        health = json.load(urllib.request.urlopen(f"{self.url}/health"))
+        self.assertEqual(health["busy"], False)
+        self.assertIn("engine_commit", health)  # which build is answering
+
+    def test_a_caller_that_connects_and_then_says_nothing_is_dropped(self):
+        import socket
+
+        with mock.patch.object(self.server.RequestHandlerClass, "timeout", 0.3), mock.patch("builtins.print"):
+            quiet = socket.create_connection(self.server.server_address, timeout=5)
+            try:
+                quiet.sendall(b"POST /signin HTTP/1.1\r\nHost: x\r\nContent-Length: 50\r\n\r\n{")  # and no more
+                quiet.settimeout(5)
+                self.assertEqual(quiet.recv(1024), b"")  # closed by the server, not held open
+            finally:
+                quiet.close()
+            # and the server still answers everyone else
+            self.assertTrue(json.load(urllib.request.urlopen(f"{self.url}/health"))["ok"])
 
     def test_a_bad_request_is_a_plain_refusal_and_costs_nothing(self):
         with self.assertRaises(urllib.error.HTTPError) as refused:
@@ -278,7 +397,8 @@ class HttpTests(unittest.TestCase):
         body = final["record"]["body"]
         # the record is sealed, tied to its private half, marked live, and holds exactly the steps that were streamed
         self.assertEqual(record.sha256(body), final["record"]["sha256"])
-        self.assertEqual(record.sha256(final["operator"]), body["operator_sha256"])
+        # these are fixed tests (the same case every time): the stream hands over the record and keeps the key
+        self.assertIsNone(final["operator"])
         self.assertTrue(body["live"] and body["settings"]["repeats"] == 1)
         self.assertEqual(body["suite"]["order"], [task])
         streamed = sum(k == "step" for k in kinds)

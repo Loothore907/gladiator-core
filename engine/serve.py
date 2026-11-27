@@ -16,7 +16,8 @@
                   typed or followed once; after that the session is all a browser needs
   POST /race      {"task", "a", "b", "difficulty", "profile", "token"}: plays one fresh scenario of that task between
                   the two models and streams what happens (text/event-stream: the runner's events, one per message),
-                  ending with a `record` message that carries the sealed record and its private half.
+                  ending with a `record` message that carries the sealed record and, under the same rule as
+                  /records/<run_id>/operator (fresh worlds only), its private half.
 
 It also serves the page where a person builds a test of their own (GET /build), and the conversation behind it
 (docs/PRODUCT.md, section 4a; engine/session.py). Each request carries everything it needs, so the server keeps no
@@ -45,7 +46,9 @@ editable"). Free text never reaches the engine.
 
 Money is guarded three times: every race has a hard cap (`--max-usd` semantics of a normal match), a race may only
 start if that cap still fits in what is left of the server's limits (a total, a budget per provider, or both),
-and only one race runs at a time. With no invites set the server only listens on this machine.
+and only one race runs at a time. Every reservation is written to the ledger file while it is open, so one that
+is still open at start-up (the process stopped under a race) is counted in full: a stop never hands money back
+to a limit. With no invites set the server only listens on this machine.
 """
 
 import base64
@@ -71,6 +74,7 @@ from engine import blueprint, packages, record, runner, session
 from engine import suite as suites
 from engine.budget import price_for
 from engine.validate import plain_problems, plain_summary
+from providers.base import PriceUnavailable
 from scorers import components
 from scorers.efficiency import PROFILES
 
@@ -184,6 +188,17 @@ def batch_summary(sealed: dict) -> dict:
     return out
 
 
+def fresh_worlds_only(sealed: dict) -> bool:
+    """Whether every test in a record generates a fresh world for each attempt, so its answers are spent the
+    moment the race ends. Only then may the answer key leave this server; a fixed test's never does."""
+    kinds = {
+        (result.get("challenge") or {}).get("instances")
+        for side in ((sealed.get("body") or {}).get("contestants") or {}).values()
+        for result in side.get("results") or []
+    }
+    return kinds == {"generator"}
+
+
 def is_batch(sealed: dict) -> bool:
     return int((sealed["body"].get("settings") or {}).get("repeats") or 1) > 1
 
@@ -192,6 +207,8 @@ RUN_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{6}")  # the only shape a run id
 LIVE_LEVELS = ("easy", "standard")  # harder levels take too long and cost too much to watch live
 HEARTBEAT_S = 10  # hosts cut a stream that stays silent; a comment line keeps it open
 MAX_BODY = 8192  # a description of 1,200 characters, in any alphabet, with the rest of the request
+REQUEST_TIMEOUT_S = 30  # a connection that sends or takes nothing for this long is closed
+PRICE_RETRY_S = 120  # how often a price that could not be read at start-up is asked for again
 
 
 class Refused(Exception):
@@ -222,12 +239,18 @@ class Ledger:
         if total_usd is None and not self.by_provider:
             raise SystemExit("The runner needs a spending limit: a total, a budget per provider, or both.")
         self.lock = threading.Lock()
-        self.state = {"spent_usd": 0.0, "held_usd": 0.0, "races": 0, "by_code": {}, "providers": {}}
+        self.state = {"spent_usd": 0.0, "held_usd": 0.0, "races": 0, "by_code": {}, "providers": {}, "open": []}
+        # What was counted at start-up for work that was in flight when the process last stopped: (holds, dollars).
+        self.recovered = (0, 0.0)
         if self.path.exists():
-            self.state.update(json.loads(self.path.read_text(encoding="utf-8")))
-            self.state["held_usd"] = 0.0  # nothing is running at start-up
-            for entry in self.state["providers"].values():
-                entry["held_usd"] = 0.0
+            try:
+                self.state.update(json.loads(self.path.read_text(encoding="utf-8")))
+            except ValueError as e:
+                raise SystemExit(
+                    f"The spending ledger at {self.path} cannot be read ({e}). The runner will not guess what was "
+                    "spent: restore the file, or remove it to start every limit afresh."
+                ) from None
+            self._count_what_was_in_flight()
         try:
             self._save()  # a limit that cannot be written down is not a limit: fail now, not after the first race
         except OSError as e:
@@ -237,11 +260,74 @@ class Ledger:
             ) from None
 
     def _save(self):
+        """Written beside the file and moved into place, so a stop in the middle of a write leaves the last whole
+        ledger where it was: a half-written one would keep the runner from starting."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.state, indent=1), encoding="utf-8")
+        scratch = self.path.with_name(self.path.name + ".tmp")
+        with open(scratch, "w", encoding="utf-8") as out:
+            out.write(json.dumps(self.state, indent=1))
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(scratch, self.path)
 
     def _provider(self, name: str) -> dict:
         return self.state["providers"].setdefault(name, {"spent_usd": 0.0, "held_usd": 0.0})
+
+    # ---- holds: every reservation is written down while it is open, so a stop cannot make one vanish ---------
+    def _open(self, kind: str, cap: float, who: str | None, providers) -> dict:
+        entry = {"kind": kind, "cap": cap, "who": who, "providers": sorted(set(providers))}
+        self.state["held_usd"] += cap
+        for name in entry["providers"]:
+            self._provider(name)["held_usd"] += cap
+        self.state.setdefault("open", []).append(entry)
+        return entry
+
+    def _close(self, kind: str, cap: float, providers) -> dict:
+        """Take the open hold this settlement is for off the list (two holds alike in every respect are the same
+        to the ledger). A settlement with no hold on the list is still counted."""
+        names = sorted(set(providers))
+        holds = self.state.setdefault("open", [])
+        for i, entry in enumerate(holds):
+            if entry["kind"] == kind and entry["providers"] == names and abs(entry["cap"] - cap) < 1e-9:
+                return holds.pop(i)
+        return {"kind": kind, "cap": cap, "who": None, "providers": names}
+
+    def _count(self, entry: dict, spent: float, spent_by: dict[str, float] | None):
+        """Release one hold and count what it cost. `spent_by`: the cost per provider; without it (the work died
+        and nobody knows) the amount is split evenly over the hold's providers."""
+        cap, names = entry["cap"], entry["providers"]
+        self.state["held_usd"] = max(0.0, self.state["held_usd"] - cap)
+        self.state["spent_usd"] = round(self.state["spent_usd"] + spent, 6)
+        for name in names:
+            provider = self._provider(name)
+            provider["held_usd"] = max(0.0, provider["held_usd"] - cap)
+            share = spent / len(names) if spent_by is None else spent_by.get(name, 0.0)
+            provider["spent_usd"] = round(provider["spent_usd"] + share, 6)
+        if entry["kind"] == "race":
+            self.state["races"] += 1
+        else:
+            self.state["read_usd"] = round(self.state.get("read_usd", 0.0) + spent, 6)
+
+    def _count_what_was_in_flight(self):
+        """A hold still open at start-up belongs to a race or a reading that was running when the process stopped
+        (a deploy, a crash, the host stopping the machine). Nobody knows what it cost, so it is counted in full,
+        exactly as a match that dies while the server lives is: a stop must never hand money back to a limit."""
+        holds, self.state["open"] = list(self.state.get("open") or []), []
+        counted = 0.0
+        for entry in holds:
+            self._count(entry, entry["cap"], None)
+            counted += entry["cap"]
+        # A ledger written before holds were listed one by one: whatever it still holds is counted the same way.
+        unlisted = self.state["held_usd"]
+        if unlisted > 1e-9:
+            self.state["spent_usd"] = round(self.state["spent_usd"] + unlisted, 6)
+            counted += unlisted
+        self.state["held_usd"] = 0.0
+        for provider in self.state["providers"].values():
+            if provider.get("held_usd", 0.0) > 1e-9:
+                provider["spent_usd"] = round(provider.get("spent_usd", 0.0) + provider["held_usd"], 6)
+            provider["held_usd"] = 0.0
+        self.recovered = (len(holds) + (1 if unlisted > 1e-9 else 0), round(counted, 6))
 
     def left(self) -> float:
         """What is left of the limit on everything together (the sum of the provider budgets if there is no total)."""
@@ -272,9 +358,7 @@ class Ledger:
                     raise Refused(
                         402, f"The live budget for {name} models is used up. Choose models from another provider."
                     )
-            self.state["held_usd"] += cap
-            for name in set(providers):
-                self._provider(name)["held_usd"] += cap
+            self._open("race", cap, who, providers)
             self.state["by_code"][who] = self.state["by_code"].get(who, 0) + 1
             self._save()
 
@@ -284,15 +368,7 @@ class Ledger:
         """Release the hold and count what the race cost. `spent_by`: the cost per provider; without it (the match
         died and nobody knows) the whole amount is split evenly over the race's providers."""
         with self.lock:
-            self.state["held_usd"] = max(0.0, self.state["held_usd"] - cap)
-            self.state["spent_usd"] = round(self.state["spent_usd"] + spent, 6)
-            names = sorted(set(providers))
-            for name in names:
-                entry = self._provider(name)
-                entry["held_usd"] = max(0.0, entry["held_usd"] - cap)
-                share = spent / len(names) if spent_by is None else spent_by.get(name, 0.0)
-                entry["spent_usd"] = round(entry["spent_usd"] + share, 6)
-            self.state["races"] += 1
+            self._count(self._close("race", cap, providers), spent, spent_by)
             self._save()
 
     def uses_left(self, kind: str, who: str, limit: int) -> int:
@@ -316,18 +392,12 @@ class Ledger:
             left = self.left_for(provider)
             if left is not None and cap > left + 1e-9:
                 raise Refused(402, f"The live budget for {provider} models is used up.")
-            self.state["held_usd"] += cap
-            self._provider(provider)["held_usd"] += cap
+            self._open("read", cap, None, (provider,))
             self._save()
 
     def settle_small(self, cap: float, spent: float, provider: str):
         with self.lock:
-            self.state["held_usd"] = max(0.0, self.state["held_usd"] - cap)
-            self.state["spent_usd"] = round(self.state["spent_usd"] + spent, 6)
-            entry = self._provider(provider)
-            entry["held_usd"] = max(0.0, entry["held_usd"] - cap)
-            entry["spent_usd"] = round(entry["spent_usd"] + spent, 6)
-            self.state["read_usd"] = round(self.state.get("read_usd", 0.0) + spent, 6)
+            self._count(self._close("read", cap, (provider,)), spent, {provider: spent})
             self._save()
 
 
@@ -375,9 +445,19 @@ class Races:
                 "status": node["provenance"].get("status"),
                 "levels": [lv for lv in LIVE_LEVELS if lv in offered] or ["standard"],
             }
+        # A model without a price cannot be capped, so it is never offered. One that can never be priced (not in
+        # the price table, a floating alias) is a mistake in how the server was started: refuse now. One whose
+        # price is read from OpenRouter's public list and cannot be read this minute is left out, said so, and
+        # asked for again while the server runs: one unreachable list must not keep every provider's models down.
+        self.wanted, self.unpriced = list(models), {}
         for model in models:
-            price_for(*providers.parse(model))  # a model without a price cannot be capped: refuse now
-        self.models = list(models)
+            try:
+                price_for(*providers.parse(model))
+            except PriceUnavailable as e:
+                self.unpriced[model] = str(e)
+        self.models = [m for m in self.wanted if m not in self.unpriced]
+        if self.unpriced:
+            threading.Thread(target=self._keep_pricing, daemon=True).start()
         self.ledger, self.max_usd = ledger, max_usd
         self.codes, self.origins, self.runs_dir = codes, origins or set(), runs_dir
         self.busy = threading.Lock()
@@ -396,6 +476,25 @@ class Races:
         # Sessions are signed with a key made from the invites themselves: nothing more to store or to leak,
         # and changing the invites signs everyone out.
         self.session_key = hashlib.sha256(("gladiator-session\n" + "\n".join(sorted(codes or []))).encode()).digest()
+
+    def _keep_pricing(self, every_s: float = PRICE_RETRY_S):
+        """Ask again for the prices that could not be read at start-up, until every model named has one."""
+        from providers.openrouter_api import refresh_catalog  # the one list prices are read from live
+
+        while self.unpriced:
+            time.sleep(every_s)
+            try:
+                refresh_catalog()
+            except PriceUnavailable:
+                continue
+            for model in list(self.unpriced):
+                try:
+                    price_for(*providers.parse(model))
+                except ValueError:
+                    continue
+                del self.unpriced[model]
+                self.models = [m for m in self.wanted if m not in self.unpriced]
+                runner.say(f"  [serve] {model} has a price again: it is offered")
 
     # ---- signing in: an invite is exchanged once for a session, so nothing is typed again ------------------
     def _sign(self, payload: str) -> str:
@@ -463,6 +562,8 @@ class Races:
             "models": [m for m in self.models if self.affordable(m)],
             # offered, but their provider's live budget cannot cover one more race
             "models_out": [m for m in self.models if not self.affordable(m)],
+            # named for this server, but without a price this minute (its provider's price list cannot be read)
+            "models_unpriced": sorted(self.unpriced),
             "budgets": self.budgets(),
             "profiles": sorted(PROFILES),
             "cap_usd_per_race": self.max_usd,
@@ -520,13 +621,8 @@ class Races:
         matches the fingerprint the sealed record carries."""
         sealed = self.sealed_record(run_id)
         body = sealed.get("body") or {}
-        kinds = {
-            (result.get("challenge") or {}).get("instances")
-            for side in (body.get("contestants") or {}).values()
-            for result in side.get("results") or []
-        }
         path = Path(self.runs_dir) / run_id / "operator.json"
-        if kinds != {"generator"} or not path.is_file():
+        if not fresh_worlds_only(sealed) or not path.is_file():
             raise Refused(404, "This record's answer key is not published.")
         private = json.loads(path.read_text(encoding="utf-8"))
         if record.sha256(private) != body.get("operator_sha256"):
@@ -540,6 +636,9 @@ class Races:
             "left_usd": max(0.0, self.ledger.left()),
             "budgets": self.budgets(),
             "races": self.ledger.state["races"],
+            # the engine build that is answering (the commit an image was built from): a deploy can check that
+            # the machine runs what was just put on it
+            "engine_commit": runner.engine_commit(),
         }
 
     def check(self, ask: dict) -> dict:
@@ -958,6 +1057,10 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        # A caller that opens a connection and then sends nothing, or stops reading, is dropped: the host lets
+        # only so many requests in at a time, and a few silent ones must not fill every place. A race's stream
+        # is never silent this long (HEARTBEAT_S), and the race itself does not depend on its viewer.
+        timeout = REQUEST_TIMEOUT_S
 
         def log_message(self, fmt, *args):
             """One short line per request: the method, the path and the status. Never a body or a query (they
@@ -1151,7 +1254,9 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
             elif "sealed" in result and batch:  # the facts of the batch; its sealed record stays on the runner
                 send("batch", {"batch": batch_summary(result["sealed"])})
             elif "sealed" in result:
-                send("record", {"record": result["sealed"], "operator": result["operator"]})
+                # the answer key goes to the viewer under the rule the records route applies: fresh worlds only
+                key = result["operator"] if fresh_worlds_only(result["sealed"]) else None
+                send("record", {"record": result["sealed"], "operator": key})
 
     return Handler
 

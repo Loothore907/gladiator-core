@@ -21,6 +21,7 @@ from providers.base import (
     SUBMIT_ACTION,
     Chat,
     FatalProviderError,
+    PriceUnavailable,
     Provider,
     ProviderError,
     Reply,
@@ -43,12 +44,27 @@ def format_tools(tools) -> list[dict]:
 _catalog: dict | None = None
 
 
+def _fetch_catalog() -> dict:
+    try:
+        with urllib.request.urlopen(f"{BASE_URL}/models", timeout=30) as resp:
+            return {m["id"]: m for m in json.load(resp)["data"]}
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise PriceUnavailable(f"OpenRouter's model list could not be read ({type(e).__name__}).") from None
+
+
 def catalog() -> dict:
     """OpenRouter's public model list (no key needed): id -> model info. Fetched once per run."""
     global _catalog
     if _catalog is None:
-        with urllib.request.urlopen(f"{BASE_URL}/models", timeout=30) as resp:
-            _catalog = {m["id"]: m for m in json.load(resp)["data"]}
+        _catalog = _fetch_catalog()
+    return _catalog
+
+
+def refresh_catalog() -> dict:
+    """Fetch the list again. The copy in use is replaced only by a list that arrived whole, so a match that is
+    running never loses its prices to a failed fetch."""
+    global _catalog
+    _catalog = _fetch_catalog()
     return _catalog
 
 
@@ -61,7 +77,7 @@ def live_price(model: str) -> dict:
         )
     info = catalog().get(model)
     if info is None:
-        raise ValueError(f"OpenRouter does not list a model called '{model}'.")
+        raise PriceUnavailable(f"OpenRouter does not list a model called '{model}'.")
     if "tools" not in (info.get("supported_parameters") or []):
         raise ValueError(f"openrouter:{model} does not support tool calling, which every Gladiator case needs.")
     p = info["pricing"]
