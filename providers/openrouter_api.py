@@ -21,6 +21,7 @@ from providers.base import (
     SUBMIT_ACTION,
     Chat,
     FatalProviderError,
+    KeyRefused,
     PriceUnavailable,
     Provider,
     ProviderError,
@@ -29,6 +30,7 @@ from providers.base import (
     Usage,
     interpret_call,
     out_of_credit,
+    refusal,
 )
 
 BASE_URL = "https://openrouter.ai/api/v1"
@@ -109,11 +111,12 @@ def usage_from(u) -> Usage:
 class OpenRouterProvider(Provider):
     name = "openrouter"
 
-    def __init__(self, model: str):
-        super().__init__(model)
-        key = os.environ.get("OPENROUTER_API_KEY")
+    def __init__(self, model: str, key: str | None = None):
+        # a key handed over for this match is the only one used; without one the environment is read
+        key = key or os.environ.get("OPENROUTER_API_KEY")
         if not key:
             raise RuntimeError("OPENROUTER_API_KEY is not set")
+        super().__init__(model, key)
         self.client = openai.OpenAI(base_url=BASE_URL, api_key=key)
 
     def request_params(self, settings: Settings, tools=None) -> dict:
@@ -147,6 +150,19 @@ class OpenRouterProvider(Provider):
 
     def list_models(self):
         return sorted(m for m, info in catalog().items() if "tools" in (info.get("supported_parameters") or []))
+
+    def check_key(self) -> None:
+        """OpenRouter's model list is public, so it says nothing about a key. Its own question about a key
+        (`/key`: whose it is and what it may still spend) costs nothing and is refused for a key it does not
+        know. Nothing of the answer is kept."""
+        request = urllib.request.Request(f"{BASE_URL}/key", headers={"Authorization": f"Bearer {self.key}"})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as resp:
+                resp.read()
+        except Exception as e:  # noqa: BLE001  only its kind and status are said, never OpenRouter's words
+            raise KeyRefused(self.name, refusal(self.name, e)) from None
+        if self.model not in self.list_models():
+            raise KeyRefused(self.name, f"{self.name} accepts this key but does not serve {self.model} to it.")
 
 
 class OpenRouterChat(Chat):

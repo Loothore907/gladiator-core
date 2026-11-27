@@ -1,5 +1,7 @@
 """Google Gemini via the official `google-genai` SDK. Key: GEMINI_API_KEY (or GOOGLE_API_KEY)."""
 
+import os
+
 from google import genai
 from google.genai import errors, types
 
@@ -58,9 +60,11 @@ def thinking_config(model: str, effort: str | None) -> types.ThinkingConfig | No
 class GoogleProvider(Provider):
     name = "google"
 
-    def __init__(self, model: str):
-        super().__init__(model)
-        self.client = genai.Client()
+    def __init__(self, model: str, key: str | None = None):
+        super().__init__(model, key)
+        # a key handed over for this match is the only one used; without one the SDK reads the environment
+        self.client = genai.Client(api_key=key) if key else genai.Client()
+        self.key = key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     def config(self, system: str, settings: Settings, tools=None) -> types.GenerateContentConfig:
         functions = format_tools(tools)

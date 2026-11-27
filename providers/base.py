@@ -15,6 +15,7 @@ the tool), plus token usage so the budget can be settled.
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 
 TOOL_NAME = "submit_action"
@@ -125,6 +126,16 @@ def out_of_credit(status: int | None, code: str | None, message: str) -> bool:
     return status == 402 or code == "insufficient_quota" or any(sign in text for sign in OUT_OF_CREDIT_SIGNS)
 
 
+def refusal(provider: str, error: Exception) -> str:
+    """Why a key could not be checked, said from the kind of failure and its HTTP status alone."""
+    status = getattr(error, "status_code", None) or getattr(error, "code", None)
+    status = status if isinstance(status, int) else None
+    kind = type(error).__name__
+    if status in (400, 401, 403):  # the question carries nothing but the key (Google answers a bad one with 400)
+        return f"{provider} did not accept this key ({kind}, HTTP {status})."
+    return f"This key could not be checked with {provider} ({kind}{f', HTTP {status}' if status else ''})."
+
+
 class FatalProviderError(RuntimeError):
     """Problems that will not fix themselves (bad key, unknown model). Stops that contestant."""
 
@@ -151,11 +162,64 @@ class Chat:
         raise NotImplementedError
 
 
+class KeyRefused(RuntimeError):
+    """A key given for one race did not pass its check, before anything was run or spent. The text is made here,
+    from the provider's name, the kind of failure and its HTTP status only: never from the provider's own
+    message, which can repeat part of the key."""
+
+    def __init__(self, provider: str, reason: str):
+        super().__init__(reason)
+        self.provider, self.reason = provider, reason
+
+
+# What a key may be written as once part of it has been hidden: letters, digits and the marks keys and their
+# masked forms are made of. A run of these that holds a piece of a key is replaced whole.
+_KEYISH = re.compile(r"[A-Za-z0-9_\-.*…•]+")
+
+
+def hide_key(text: str, key: str | None) -> str:
+    """`text` with `key` taken out: the key itself, and any word that carries its first or last characters (a
+    provider that refuses a key often repeats it with the middle starred out). For text about to be shown,
+    logged or written into a record."""
+    text = str(text)
+    if not key or len(key) < 8:
+        return text
+    text = text.replace(key, "(the key)")
+    head, tail = key[:8], key[-4:]
+
+    def masked(word: re.Match) -> str:
+        found = word.group(0)
+        starred = any(mark in found for mark in ("*", "…", "•", ".."))
+        if head in found or (starred and found.rstrip(".…").endswith(tail)):
+            return "(part of the key)"
+        return found
+
+    return _KEYISH.sub(masked, text)
+
+
 class Provider:
     name = "base"
 
-    def __init__(self, model: str):
+    def __init__(self, model: str, key: str | None = None):
         self.model = model
+        # The key this provider calls with, when it was handed one for this match instead of reading the
+        # environment. Kept only to take it out of text (`hide`); a provider that reads the environment sets
+        # it too where its client says which key it found.
+        self.key = key
+
+    def hide(self, text) -> str:
+        """Any text about a failed call, with this provider's key taken out of it."""
+        return hide_key(text, self.key)
+
+    def check_key(self) -> None:
+        """Ask the provider, without spending anything, whether it accepts this key and serves this model to
+        it. Raises KeyRefused saying which of the two failed. The provider's own words are never passed on."""
+        try:
+            served = self.list_models()
+        except Exception as e:  # noqa: BLE001  whatever the SDK raised: only its kind and status are said
+            raise KeyRefused(self.name, refusal(self.name, e)) from None
+        if self.model not in served:
+            raise KeyRefused(self.name, f"{self.name} accepts this key but does not serve {self.model} to it.")
 
     def open_chat(self, system: str, first_message: str, settings: Settings, tools=None) -> Chat:
         """tools: list of ToolSpec offered to the model (default: the single submit_action tool)."""

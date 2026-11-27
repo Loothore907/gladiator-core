@@ -26,6 +26,8 @@ runner applies the same rule to the races it hands out (`docs/DEPLOYMENT.md`).
 | `budget` | Run cap, per-contestant cap, spent in total and per side, whether the cap was reached. |
 | `verdict` | Winner and how it was decided, pair wins by reason (success / progress / efficiency), the efficiency summary, reliability per side (tests passed on every repeat, pass^k), confidence (sign test), totals, and which attempts were excluded and why. |
 | `operator_sha256` | Hash of the private operator record. |
+| `live` | `true` for a race started from a live view on a race runner, not part of a suite run. Absent otherwise. |
+| `own_keys` | `true` for a live race played with API keys its visitor handed over for it (`gladiator serve --own-keys`): its cost was paid by that visitor, not by whoever runs the runner. Absent otherwise. No key, and no part of one, is ever in a record. |
 
 ## One attempt (`contestants.X.results[]`)
 | Field | What |

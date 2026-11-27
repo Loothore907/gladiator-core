@@ -31,9 +31,11 @@ def format_tools(tools) -> list[dict]:
 class AnthropicProvider(Provider):
     name = "anthropic"
 
-    def __init__(self, model: str):
-        super().__init__(model)
-        self.client = anthropic.Anthropic()
+    def __init__(self, model: str, key: str | None = None):
+        super().__init__(model, key)
+        # a key handed over for this match is the only one used; without one the SDK reads the environment
+        self.client = anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
+        self.key = key or getattr(self.client, "api_key", None)
 
     def request_params(self, settings: Settings, tools=None) -> dict:
         params = {

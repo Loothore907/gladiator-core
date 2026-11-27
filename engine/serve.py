@@ -19,7 +19,10 @@
   POST /race      {"task", "a", "b", "difficulty", "profile", "token"}: plays one fresh scenario of that task between
                   the two models and streams what happens (text/event-stream: the runner's events, one per message),
                   ending with a `record` message that carries the sealed record and, under the same rule as
-                  /records/<run_id>/operator (fresh worlds only), its private half.
+                  /records/<run_id>/operator (fresh worlds only), its private half. Where the server takes
+                  races a visitor pays for (`--own-keys`), the request may carry "keys" ({provider: API key})
+                  in place of a sign-in: the race is played with those keys and no other, and no key is ever
+                  stored, logged or sent back.
 
 It also serves the page where a person builds a test of their own (GET /build), and the conversation behind it
 (docs/PRODUCT.md, section 4a; engine/session.py). Each request carries everything it needs, so the server keeps no
@@ -78,7 +81,7 @@ from engine import blueprint, packages, record, runner, session
 from engine import suite as suites
 from engine.budget import price_for
 from engine.validate import plain_problems, plain_summary
-from providers.base import PriceUnavailable
+from providers.base import KeyRefused, PriceUnavailable, hide_key
 from scorers import components
 from scorers.efficiency import PROFILES
 
@@ -267,6 +270,8 @@ def is_batch(sealed: dict) -> bool:
 
 
 RUN_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{6}")  # the only shape a run id has: nothing else reaches the disk
+# A key someone gives for one race: one unbroken run of the characters keys are made of, of a believable length.
+OWN_KEY = re.compile(r"[A-Za-z0-9_\-.:=+/]{8,400}")
 # A page served from this machine: http://localhost:8000, http://127.0.0.1:8790 and the like.
 LOCAL_PAGE = re.compile(r"http://(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?")
 LIVE_LEVELS = ("easy", "standard")  # harder levels take too long and cost too much to watch live
@@ -519,7 +524,29 @@ class Races:
         batch_pass_rate: float = 0.8,
         after_race: str | None = None,
         windows: dict[str, tuple[int | None, int | None]] | None = None,
+        own_keys: bool = False,
+        own_models: list[str] | None = None,
+        own_per_hour: int = 12,
+        own_per_hour_all: int = 120,
+        client_header: str | None = None,
     ):
+        # Where a request's own address is read from. Behind a host's proxy every connection comes from the
+        # proxy, which writes the visitor's address into a header: name that header here (on Fly.io,
+        # Fly-Client-IP). Without one the address of the connection itself is used. A header is only as
+        # trustworthy as the proxy that writes it, so none is believed unless it is named.
+        self.client_header = client_header
+        # A race its visitor pays for: the request carries the API key of each model's provider, and the race is
+        # played with those keys and with no other. It needs no sign-in and touches none of this server's
+        # budgets; the cap per race still holds. A key is checked with its provider before anything runs, lives
+        # in memory for that one race, and is in nothing this server writes, logs or sends back. Off unless asked
+        # for. `own_models`: the models such a race may use (default: the server's own list); this server needs
+        # no key of its own for them. `own_per_hour`: such races one address may start in an hour, and
+        # `own_per_hour_all` all addresses together, so nobody can keep the one place a race has to themselves.
+        self.own_keys = bool(own_keys)
+        self.own_wanted = list(own_models or models) if own_keys else []
+        self.own_per_hour, self.own_per_hour_all = int(own_per_hour), int(own_per_hour_all)
+        self.own_started: dict[str, list[float]] = {}
+        self.own_lock = threading.Lock()
         # The days a sign-in works on: {sign-in id: (from, until)} in seconds, None where it has no such bound.
         # Outside them neither the invite nor a session made from it gets in.
         self.windows = dict(windows or {})
@@ -554,7 +581,7 @@ class Races:
         # price is read from OpenRouter's public list and cannot be read this minute is left out, said so, and
         # asked for again while the server runs: one unreachable list must not keep every provider's models down.
         self.wanted, self.unpriced = list(models), {}
-        for model in models:
+        for model in dict.fromkeys([*models, *self.own_wanted]):
             try:
                 price_for(*providers.parse(model))
             except PriceUnavailable as e:
@@ -687,6 +714,93 @@ class Races:
         left = self.ledger.left_for(providers.parse(model)[0])
         return left is None or left + 1e-9 >= self.cap_for(runs)
 
+    # ---- a race its visitor pays for, with their own key ----------------------------------------------------
+    def own_models(self) -> list[str]:
+        """The models a race with the visitor's own key may use: those named for it that have a price now."""
+        return [m for m in self.own_wanted if m not in self.unpriced]
+
+    def check_own(self, ask: dict) -> dict:
+        """A request that carries its own keys: every value one this server offers, a key for each model's
+        provider and nothing else kept. Nothing is asked of any provider here."""
+        if not self.own_keys:
+            raise Refused(403, "This runner does not take races paid for with your own key.")
+        given = ask.get("keys")
+        if not isinstance(given, dict):
+            raise Refused(400, "Send the keys as an object: the provider's name, then its key.")
+        task = ask.get("task")
+        if task not in self.tasks:
+            raise Refused(400, f"Unknown task. Choose one of: {', '.join(self.tasks)}.")
+        a, b = ask.get("a"), ask.get("b")
+        offered = self.own_models()
+        if a not in offered or b not in offered:
+            raise Refused(400, "Both models must come from the list this server offers for a race with your own key.")
+        if (ask.get("runs") or 1) != 1:
+            raise Refused(400, "With your own key a race is one scenario: batches are not offered.")
+        if a == b:
+            raise Refused(400, "Choose two different models.")
+        keys = {}
+        for model in (a, b):
+            name = providers.parse(model)[0]
+            key = given.get(name)
+            key = key.strip() if isinstance(key, str) else ""
+            if not key:
+                raise Refused(400, f"A key for {name} is needed to race {model}.")
+            if not OWN_KEY.fullmatch(key):
+                raise Refused(400, f"That does not look like a key for {name}: it has a space or a mark no key has.")
+            keys[name] = key
+        level = ask.get("difficulty") or "standard"
+        if level not in self.tasks[task]["levels"]:
+            raise Refused(400, f"Difficulty must be one of: {', '.join(self.tasks[task]['levels'])}.")
+        profile = ask.get("profile") or "budget"
+        if profile not in PROFILES:
+            raise Refused(400, f"Profile must be one of: {', '.join(sorted(PROFILES))}.")
+        return {
+            "task": task,
+            "a": a,
+            "b": b,
+            "difficulty": level,
+            "profile": profile,
+            "who": None,
+            "runs": 1,
+            "early_stop": False,
+            "keys": keys,
+        }
+
+    def admit_own(self, client: str | None, now: float | None = None) -> None:
+        """Count one race with a visitor's own key against its address, or refuse it: so many an hour for one
+        address, and so many for all of them. A key that turns out not to be accepted is counted too, so this
+        server is no place to try keys out."""
+        now = time.time() if now is None else now
+        who = str(client or "unknown")
+        with self.own_lock:
+            for address in list(self.own_started):
+                self.own_started[address] = [t for t in self.own_started[address] if now - t < 3600]
+                if not self.own_started[address]:
+                    del self.own_started[address]
+            mine = self.own_started.get(who, [])
+            if len(mine) >= self.own_per_hour:
+                wait = max(1, math.ceil((3600 - (now - mine[0])) / 60))
+                raise Refused(
+                    429,
+                    f"This runner starts {self.own_per_hour} races an hour with one visitor's own key, and yours "
+                    f"are used. The next one can start in about {wait} minute(s).",
+                )
+            if sum(len(v) for v in self.own_started.values()) >= self.own_per_hour_all:
+                raise Refused(429, "This runner has started as many races this hour as it takes. Try again later.")
+            self.own_started.setdefault(who, []).append(now)
+
+    def check_keys(self, ask: dict) -> None:
+        """Ask each provider, for nothing, whether it accepts the key given for it and serves the model to it.
+        A key that is refused stops the race here: nothing is run, spent or filed."""
+        for model in dict.fromkeys((ask["a"], ask["b"])):
+            name = providers.parse(model)[0]
+            try:
+                providers.create(model, ask["keys"][name]).check_key()
+            except KeyRefused as no:
+                raise Refused(403, no.reason) from None
+            except Exception as e:  # noqa: BLE001  only its kind is said: an SDK's own words can repeat a key
+                raise Refused(403, f"The key for {name} could not be used ({type(e).__name__}).") from None
+
     def allows(self, origin: str) -> bool:
         """Whether a browser page at this address may call the runner: one named at the start (--origin), or,
         on a runner with no invites, any page served from this machine itself. Such a runner listens on this
@@ -719,6 +833,17 @@ class Races:
             "batches": [{"runs": n, "cap_usd": self.cap_for(n)} for n in self.batch_sizes],
             "batch_pass_rate": self.batch_pass_rate,
             "needs_code": self.codes is not None,
+            # races a visitor pays for with their own key, where this server takes them: which models, the cap
+            # of one race, and how many one address may start in an hour
+            "own_keys": (
+                {
+                    "models": self.own_models(),
+                    "cap_usd_per_race": self.max_usd,
+                    "per_hour": self.own_per_hour,
+                }
+                if self.own_keys
+                else None
+            ),
         }
 
     def races_run(self) -> dict:
@@ -793,6 +918,8 @@ class Races:
         """Every value must be one this server offers. Returns the cleaned request."""
         if not isinstance(ask, dict):
             raise Refused(400, "Send a JSON object.")
+        if ask.get("keys") is not None:  # paid for by the visitor: no sign-in, none of this server's budgets
+            return self.check_own(ask)
         who = self.identify(ask)
         task = ask.get("task")
         if task not in self.tasks:
@@ -848,17 +975,26 @@ class Races:
         loaded["path"] = f"live-race (from {self.base_path})"
         return loaded
 
-    def run(self, ask: dict, on_event) -> tuple[dict, dict]:
-        """Play the race (or the batch). Returns (sealed record, private half). Raises Refused before any spending."""
+    def run(self, ask: dict, on_event, client: str | None = None) -> tuple[dict, dict]:
+        """Play the race (or the batch). Returns (sealed record, private half). Raises Refused before any spending.
+
+        `client`: the address the request came from, for a race paid for with the visitor's own key (they are
+        counted per address). Such a race holds nothing against this server's budgets and is settled against
+        none: its keys are checked for nothing, used for this one match and dropped."""
         ask = self.check(ask)
         runs = ask["runs"]
         cap = self.cap_for(runs)
+        keys = ask.get("keys")  # None unless the visitor pays
         if not self.busy.acquire(blocking=False):
             raise Refused(409, "The runner is busy with another race or a test being checked. Try again in a minute.")
         try:
             suite = self.suite_for(ask)
             sides = {"A": providers.parse(ask["a"])[0], "B": providers.parse(ask["b"])[0]}
-            self.ledger.hold(cap, ask["who"], tuple(sides.values()))
+            if keys:
+                self.admit_own(client)
+                self.check_keys(ask)
+            else:
+                self.ledger.hold(cap, ask["who"], tuple(sides.values()))
         except BaseException:
             self.busy.release()
             raise
@@ -896,10 +1032,15 @@ class Races:
                 ask["b"],
                 cap,
                 repeats=runs,
-                on_event=on_event,
+                # nothing a viewer is sent may carry a key, whatever a provider's SDK put in an event
+                on_event=(lambda event: on_event(without_keys(event, keys))) if keys else on_event,
                 parallel=self.batch_parallel if runs > 1 else 1,
                 after_attempt=after if ask["early_stop"] else None,
+                keys=keys,
             )
+            if keys:
+                body, operator = without_keys(body, keys), without_keys(operator, keys)
+                body["own_keys"] = True  # paid for by whoever started it, not from this server's budgets
             if stopped:
                 body["early_stop"] = dict(stopped)
             body["run_id"] = run_id
@@ -912,6 +1053,11 @@ class Races:
                 spent_by[name] = spent_by.get(name, 0.0) + cost
             body = dict(body, operator_sha256=record.sha256(operator))
             sealed = {"sha256": record.sha256(body), "body": body}
+            if keys:
+                # The last stop: a record that still names a key is never filed, sent or listed.
+                written = json.dumps([sealed, operator], ensure_ascii=False, default=str)
+                if any(key in written for key in keys.values()):
+                    raise RuntimeError("this race's record names a key it was given, so it is not filed")
             if self.runs_dir:
                 folder = Path(self.runs_dir) / run_id
                 folder.mkdir(parents=True, exist_ok=False)
@@ -929,8 +1075,24 @@ class Races:
                 threading.Thread(target=self.announce_filed, daemon=True).start()
             return sealed, operator
         finally:
-            self.ledger.settle(cap, spent, tuple(sides.values()), spent_by)
+            if not keys:
+                self.ledger.settle(cap, spent, tuple(sides.values()), spent_by)
             self.busy.release()
+
+
+def without_keys(value, keys: dict | None):
+    """`value` (text, or lists and objects of it) with every key in `keys` taken out, wherever it stands."""
+    if not keys:
+        return value
+    if isinstance(value, str):
+        for key in keys.values():
+            value = hide_key(value, key)
+        return value
+    if isinstance(value, dict):
+        return {name: without_keys(item, keys) for name, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [without_keys(item, keys) for item in value]
+    return value
 
 
 def first_sentence(text: str) -> str:
@@ -1338,14 +1500,19 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
 
             events: queue.Queue = queue.Queue()
             result: dict = {}
+            # whose request this is, for the count of races a visitor pays for with their own key
+            named = (self.headers.get(races.client_header) or "").strip() if races.client_header else ""
+            client = named[:64] or self.client_address[0]
 
             def play():
                 try:
-                    result["sealed"], result["operator"] = races.run(ask, events.put)
+                    result["sealed"], result["operator"] = races.run(ask, events.put, client)
                 except Refused as no:
                     result["refused"] = no
                 except Exception as e:  # noqa: BLE001  report it to the viewer; the ledger already counted the cap
-                    result["error"] = f"{type(e).__name__}: {e}"
+                    given = ask.get("keys") if isinstance(ask, dict) else None
+                    given = {k: v for k, v in given.items() if isinstance(v, str)} if isinstance(given, dict) else None
+                    result["error"] = without_keys(f"{type(e).__name__}: {e}", given)
                 finally:
                     events.put(None)
 

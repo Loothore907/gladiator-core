@@ -61,6 +61,33 @@ uv run gladiator serve                                # this machine only, your 
   read at start-up; the runner asks again every two minutes and offers it once it has a price (`/options`,
   `models_unpriced`). A model that can never be priced still refuses the start.
 - `GET /health` names the engine build that is answering (`engine_commit`), so a deploy can check it.
+- **A race its visitor pays for (`--own-keys`, off unless asked for).** A hosted runner can also take a race
+  whose request carries the API key of each model's provider (`"keys": {"openrouter": "..."}`), so anyone with
+  a key can race without a sign-in and without this server's money. What holds for such a race:
+  - It is played with the keys in the request and with no other. A model whose provider has no key in the
+    request is refused: it can never fall back on a key this machine holds. The runner needs no key of its own
+    for the models it offers this way (`--own-key-model`, default the `--model` list), and starts with none.
+  - Each key is checked with its provider first, by a call that costs nothing (the provider's list of models;
+    for OpenRouter its own question about a key). A key that is refused, or that may not use the model, stops
+    the race there: nothing is run, spent or filed, and the visitor is told which of the two it was.
+  - A key lives in memory for that one race. It is not in the spending ledger, the sealed record, its private
+    half, the stream, the log or any listing. A provider that refuses a key often repeats part of it, starred
+    out: what a provider says is cleaned of the key, whole or in part, before it is kept anywhere, and why a
+    key failed its check is said from the kind of failure and its HTTP status alone. As a last stop, a record
+    that still names a key is not filed. `tests/test_serve.py` (`VisitorKeyTests`) holds all of it.
+  - None of this server's budgets is held or settled, and no sign-in is counted. The cap per race still stops
+    the race, and the record says who paid (`own_keys: true`), so the operator's own spend can still be added
+    up from the records.
+  - One scenario at a time: batches are not offered. The one-race-at-a-time rule holds, and one address may
+    start so many an hour (`--own-keys-per-hour`, 12), a refused key counted too, so the server is neither one
+    visitor's alone nor a place to try keys out. Behind a host's proxy, name the header the proxy writes the
+    visitor's address into (`--client-address-header`; on Fly.io `Fly-Client-IP`): a header is believed only
+    if it is named.
+  - Only tests that generate a fresh world for each attempt should be on offer to it: whether a visitor's key
+    is enrolled in a provider's data-sharing programme cannot be known, and a fixed or holdout test must never
+    run through such a key. The base suites the race runner uses hold generated tests only.
+  - It needs HTTPS in front of it: the key travels in the request. `/options` says whether a runner takes such
+    races (`own_keys`: the models, the cap of one race, the hourly count).
 - With no invites (`GLADIATOR_RACE_CODES`, comma-separated) it refuses to listen beyond this machine. An invite
   is exchanged once for a session (`POST /signin`) that lasts 30 days; a browser then needs only the session.
   Sessions are signed with a key made from the invites, so changing the invites signs everyone out. The ledger
