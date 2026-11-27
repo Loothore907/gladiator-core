@@ -249,10 +249,13 @@ class Spaces:
 def _answer(spaces: Spaces, handler, method: str) -> None:
     path, _, query = handler.path.partition("?")
     asked = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair)
-    if not spaces.base:  # links are made for the address this runner is reached at
-        host = handler.headers.get("X-Forwarded-Host") or handler.headers.get("Host") or ""
+    if not spaces.base:
+        # No address was given at start (`gladiator serve --public-url`): links are made for the address this
+        # request was sent to. Only the Host header says that; a forwarding header is whatever its sender wrote,
+        # and a link built from one would send a person's download to somebody else's server.
+        host = handler.headers.get("Host") or ""
         local = host.split(":")[0] in ("127.0.0.1", "localhost")
-        spaces.base = f"{handler.headers.get('X-Forwarded-Proto') or ('http' if local else 'https')}://{host}"
+        spaces.base = f"{'http' if local else 'https'}://{host}"
 
     # The body is read before anything is decided. A request refused with its body unread would leave that body
     # on the connection, where it is taken for the next request and ends up in the log.

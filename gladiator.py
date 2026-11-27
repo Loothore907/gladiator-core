@@ -177,7 +177,7 @@ def cmd_serve(args):
             name, _, key = entry.strip().partition(":")
             if name and key:
                 keys[name] = key
-        spaces = hosted.Spaces(races, state, keys)
+        spaces = hosted.Spaces(races, state, keys, public_url=args.public_url or "")
     server = serve.serve(races, args.host, args.port, forks, spaces)
     who = f"{len(codes)} invite(s)" if codes else "no invites: this machine only"
     limit = f"${total:.2f} in total" if total is not None else "the provider budgets"
@@ -185,9 +185,17 @@ def cmd_serve(args):
         f"\n  budget {b['provider']}: ${b['left_usd']:.2f} left of ${b['limit_usd']:.2f}" for b in races.budgets()
     )
     out = f"\n  not offered (no key or no budget here): {', '.join(left_out)}" if left_out else ""
+    if races.unpriced:  # asked for again while the server runs
+        out += "".join(f"\n  not offered until it has a price: {m} ({why})" for m, why in races.unpriced.items())
+    holds, counted = ledger.recovered
+    if holds:  # a race or a reading was in flight when the process last stopped
+        out += (
+            f"\n  in flight at the last stop: {holds} hold(s), ${counted:.2f} counted as spent "
+            "(nobody knows what they cost)"
+        )
     print(
         f"Gladiator race runner on http://{args.host}:{server.server_address[1]}  ({who})\n"
-        f"  tasks: {', '.join(races.tasks)}\n  models: {', '.join(models)}\n"
+        f"  tasks: {', '.join(races.tasks)}\n  models: {', '.join(races.models)}\n"
         f"  cap ${args.max_usd:.2f} per race, ${ledger.left():.2f} left of {limit}{per}{out}\n"
         f"  build page: /build  (descriptions read by {reader or 'nobody: matched by their words'}; "
         f"creating open to {'everyone' if args.open_create else 'signed-in visitors'})"
@@ -691,6 +699,11 @@ def main(argv=None):
     )
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8787)
+    sv.add_argument(
+        "--public-url",
+        help="the address this runner is reached at, e.g. https://race.example.org: download links handed to "
+        "assistants are made for it (default: the address the first request was sent to)",
+    )
     sv.add_argument("--state", default="race_state", help="folder for the spending ledger and the races' records")
     sv.add_argument(
         "--reader",

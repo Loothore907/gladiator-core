@@ -165,6 +165,18 @@ class OverHttpTests(WithARunner):
             self.assertIsNone(z.testzip())
         self.assertEqual(self.api("list_tests", key=INVITE)["yours"], [])
 
+    def test_a_download_link_is_never_made_for_an_address_a_caller_claims(self):
+        # the first request after a start, from anyone at all, naming somebody else's server as the address
+        claimed = {"X-Forwarded-Host": "elsewhere.example", "X-Forwarded-Proto": "http"}
+        urllib.request.urlopen(urllib.request.Request(f"{self.url}/api", headers=claimed), timeout=20).read()
+        link = self.spaces.link("org-acme-ltd", "acme/returns-desk@1.0.0")
+        self.assertTrue(link.startswith(f"{self.url}/space/download?t="), link)
+        # an address given at start is the one used, whatever any request says
+        fixed = make(self.tmp / "fixed", public_url="https://race.example.org/")
+        self.assertTrue(
+            fixed.link("org-acme-ltd", "acme/x@1.0.0").startswith("https://race.example.org/space/download?t=")
+        )
+
     def test_without_a_key_nothing_but_the_description_answers(self):
         for key in (None, "nope"):
             with self.assertRaises(urllib.error.HTTPError) as refused:

@@ -2,7 +2,8 @@
 
 One host is active: the race runner behind the Gladiator Ledger live demo (`gladiator serve`, described below),
 on Fly.io since 2026-11-24. It is deployed from the project's private operations repository, by commit id, with
-its keys in the host's secret store and its spending ledger and race records on a volume. Nothing else is hosted.
+its keys in the host's secret store and its spending ledger and race records on a volume. Nothing else of the
+engine is hosted (Gladiator Ledger keeps its own small record service, described in that repository).
 This file records the rules any hosting follows, so the v1 cloud problems don't repeat.
 
 ## What gets deployed
@@ -42,6 +43,17 @@ uv run python gladiator.py serve                      # this machine only, your 
   provider (`--provider-usd openrouter=30`, repeatable), or both. A model is offered only while its provider
   can cover one more race and this server holds that provider's key; `/options` shows each budget and what is
   left of it.
+- A stop cannot lose money from the count. Every reservation is written to the ledger file while it is open. One
+  still open at start-up belongs to a race that was running when the process stopped (a deploy, a crash, the
+  host stopping the machine): nobody knows what it cost, so its whole cap is counted, as for a match that dies
+  in a living server, and the start-up log says so. The race itself is lost: do not deploy while `/health` says
+  `busy`, and keep the machine awake while people are racing.
+- The ledger file is written beside itself and moved into place, so a stop in the middle of a write leaves the
+  last whole one. A ledger that cannot be read stops the start: it is never taken for an empty one.
+- A model whose price is read from OpenRouter's public list is left out, and said so, when that list cannot be
+  read at start-up; the runner asks again every two minutes and offers it once it has a price (`/options`,
+  `models_unpriced`). A model that can never be priced still refuses the start.
+- `GET /health` names the engine build that is answering (`engine_commit`), so a deploy can check it.
 - With no invites (`GLADIATOR_RACE_CODES`, comma-separated; `invite:40` gives one its own number of races) it
   refuses to listen beyond this machine. An invite is exchanged once for a session (`POST /signin`) that lasts
   30 days; a browser then needs only the session. Sessions are signed with a key made from the invites, so
@@ -53,7 +65,10 @@ uv run python gladiator.py serve                      # this machine only, your 
   anyone can re-grade a finished race (owner, 2026-11-27). Two rules, checked on every request: every test in
   the record generates a fresh world for each attempt (the answers are spent the moment the race ends; the
   answer key of a fixed test never leaves the server), and the file matches the fingerprint in the sealed
-  record. A record is on file only once its race is over.
+  record. A record is on file only once its race is over. The stream of a race follows the first rule too: its
+  last message carries the answer key only for fresh worlds.
+- A connection that sends or takes nothing for 30 seconds is closed, so silent callers cannot fill the places
+  the host allows at one time. A race does not depend on its viewer's connection.
 - A browser page on another address must be named with `--origin`.
 
 ### The build page (a test for your own flow)
@@ -94,6 +109,9 @@ connects: `docs/ASSISTANT.md`.
 - **No model, no spend.** The caller's own model does the reading; this server calls none. Creating a test runs
   the full automatic validation, so it shares the one-thing-at-a-time rule with races and with the build page.
   A key may create 30 tests and a space holds 50.
+- **Download links are made for the address given at start** (`--public-url https://race.example.org`). Without
+  it they are made for the address the first request was sent to (its `Host`); a forwarding header, which is
+  whatever its sender wrote, is never used.
 - **MCP is the MCP library's own web app**, on an inner port of the machine that only the runner's process can
   reach. The runner checks the key, then passes the request on with the caller's space; the inner app refuses
   anyone else. No protocol is hand-made.
@@ -110,20 +128,24 @@ connects: `docs/ASSISTANT.md`.
 4. **Keys live only in the host's secret store**, never in the image, the repo or logs.
 5. **Two spending caps:** the app's `--max-usd` per run, and a spending limit set in each provider's
    console (and the host's billing alert). Either one stops a runaway.
-6. **Rollback = run the previous image tag.** No migrations or state make this harder.
+6. **Rollback = run the previous image tag**, with the start command it was deployed with (a newer command may
+   name options an older image does not know, and that image would not start). No migrations or state make
+   this harder.
 7. **Results leave the host as files** (`record.json`, `operator.json`, `report.md`). `gladiator verify`
    checks them anywhere.
 8. **Live smoke runs against the deployed image** before it's used for anything that matters.
 
 ## When we pick a host: the switch-on checklist
 
-- [ ] Choose the target (a GitHub Actions scheduled job, a container service, or the customer's cluster).
-      For the race runner this is done: a container service (Fly.io).
+- [x] Choose the target (a GitHub Actions scheduled job, a container service, or the customer's cluster).
+      For the race runner: a container service (Fly.io).
 - [x] Image published by CI: every push to `main` that passes its checks is pushed to
       `ghcr.io/loothore907/gladiator-core`, tagged with its full commit id and `main` (the `publish` job).
       Deploy by commit id, never by `main`.
-- [ ] Put the keys in the host's secret store; set provider-side spend limits.
-- [ ] Decide where `runs/` lives (bucket or volume) and who can read `operator.json` (it contains the
-      private answer-side data). For the race runner this is decided: a volume, and the runner itself hands
-      out the answer key of a finished race on generated worlds (`/records/<run_id>/operator`, above).
-- [ ] Run the live smoke test against the deployed image.
+- [x] Put the keys in the host's secret store; set provider-side spend limits. For the race runner the keys
+      are in Fly's secret store; the limits are set in each provider's console by the owner.
+- [x] Decide where `runs/` lives (bucket or volume) and who can read `operator.json` (it contains the
+      private answer-side data). For the race runner: a volume, and the runner itself hands out the answer key
+      of a finished race on generated worlds (`/records/<run_id>/operator`, above).
+- [ ] Run the live smoke test against the deployed image. Not automated yet: after each deploy a person signs
+      in and runs one live race, and the deploy checks `/health`, `/options` and that a wrong invite is refused.
