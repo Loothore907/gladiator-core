@@ -1,12 +1,17 @@
 """A race runner: start one match over HTTP and watch it happen.
 
-`gladiator serve` answers five requests:
+`gladiator serve` answers these requests:
 
   GET  /options   what a race can be made of: the tasks, the models whose provider can still pay for a race,
                   each provider's budget and what is left of it, difficulty levels and scoring profiles
   GET  /health    whether a race is running, and how much of each spending limit is left
   GET  /races     the live races this server has run, newest last: for each its sealed record's id and seal,
                   the task, the two models, who won, who passed and what each cost. Public facts only
+  GET  /records/<run_id>            the sealed public record of one filed race or batch, exactly as filed
+  GET  /records/<run_id>/operator   its private half, the answer key of its generated worlds, so anyone can
+                  re-grade a finished race (owner, 2026-11-27). Only for a record whose every test generates a
+                  fresh world for each attempt (the answers are spent the moment the race ends; a fixed
+                  test's answers never leave), and only when it matches the fingerprint in the sealed record
   POST /signin    {"invite"} (or {"token"} to renew): a session token and the races it has left. An invite is
                   typed or followed once; after that the session is all a browser needs
   POST /race      {"task", "a", "b", "difficulty", "profile", "token"}: plays one fresh scenario of that task between
@@ -507,6 +512,27 @@ class Races:
             raise Refused(404, "No such record.")
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def answer_key(self, run_id: str) -> dict:
+        """The private half of one finished race or batch on file: the answer key of its generated worlds, so
+        anyone can re-grade it (owner, 2026-11-27). A record is on file only once its race is over. Two rules, the
+        same a results store applies when it publishes one: every test in the record generates a fresh world for
+        each attempt, so the answers are spent (a fixed test's answers never leave this server); and the file
+        matches the fingerprint the sealed record carries."""
+        sealed = self.sealed_record(run_id)
+        body = sealed.get("body") or {}
+        kinds = {
+            (result.get("challenge") or {}).get("instances")
+            for side in (body.get("contestants") or {}).values()
+            for result in side.get("results") or []
+        }
+        path = Path(self.runs_dir) / run_id / "operator.json"
+        if kinds != {"generator"} or not path.is_file():
+            raise Refused(404, "This record's answer key is not published.")
+        private = json.loads(path.read_text(encoding="utf-8"))
+        if record.sha256(private) != body.get("operator_sha256"):
+            raise Refused(404, "This record's answer key is not published.")
+        return private
+
     def health(self) -> dict:
         return {
             "ok": True,
@@ -1000,9 +1026,13 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
                 self._json(200, races.health())
             elif path == "/races":
                 self._json(200, races.races_run())
-            elif path.startswith("/records/"):  # one filed race, public half only
+            elif path.startswith("/records/"):  # one filed race: its sealed record, or its answer key
                 try:
-                    self._json(200, races.sealed_record(path[len("/records/") :]))
+                    name = path[len("/records/") :]
+                    if name.endswith("/operator"):
+                        self._json(200, races.answer_key(name[: -len("/operator")]))
+                    else:
+                        self._json(200, races.sealed_record(name))
                 except Refused as no:
                     self._json(no.status, {"error": no.reason})
             elif forks and path in STATIC:

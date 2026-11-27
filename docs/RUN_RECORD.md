@@ -9,6 +9,11 @@ in memory; the file and its seal never change.
 `record.json` is `{"sha256": ..., "body": {...}}`. The hash covers the canonical JSON of `body`, and
 `body.operator_sha256` ties in `operator.json`. `python gladiator.py verify runs/<run_id>` re-checks both.
 
+`operator.json` is private while a match is being played. Once the match is over it may be published beside the
+record, so anyone can re-grade it, when every test in the match generates a fresh world for each attempt
+(`instances: generator`): those answers are spent. The answer key of a fixed test is never published. The race
+runner applies the same rule to the races it hands out (`docs/DEPLOYMENT.md`).
+
 ## `body`
 | Field | What |
 |---|---|
