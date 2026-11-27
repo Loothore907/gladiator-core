@@ -222,6 +222,122 @@ class RulesTests(unittest.TestCase):
             self.assertNotIn("judge-1", written)
             self.assertNotIn(signature, written)
 
+    def test_an_invite_can_carry_its_own_number_of_races_or_its_own_budget_and_days(self):
+        day = 86400
+        dec10 = 1796860800  # 2026-12-10 00:00 UTC
+        read = serve.read_invites("plain, counted:40 ,judges:usd=40:from=2026-12-10:until=2026-12-17,,both:usd=5:12")
+        self.assertEqual(read["plain"], {"races": None, "usd": None, "from": None, "until": None})
+        self.assertEqual(read["counted"]["races"], 40)
+        # `until` is the first moment after its day: the invite works through the whole of 17 December
+        self.assertEqual(read["judges"], {"races": None, "usd": 40.0, "from": dec10, "until": dec10 + 8 * day})
+        self.assertEqual((read["both"]["usd"], read["both"]["races"]), (5.0, 12))
+        self.assertEqual(serve.day_of(read["judges"]["from"]), "10 December 2026")
+        self.assertEqual(serve.day_of(read["judges"]["until"], last=True), "17 December 2026")
+        self.assertEqual(serve.read_invites(""), {})
+        # a mistake stops the start, and says which entry without a character of the invite
+        for bad in (
+            "s3cret-invite:usd=lots",
+            "s3cret-invite:usd=0",
+            "s3cret-invite:from=10-12-2026",
+            "s3cret-invite:until=tomorrow",
+            "s3cret-invite:budget=40",
+            "s3cret-invite:from=2026-12-17:until=2026-12-10",
+            ":usd=40",
+        ):
+            with self.assertRaises(SystemExit) as stopped:
+                serve.read_invites("fine:3," + bad)
+            self.assertIn("entry 2", str(stopped.exception), bad)
+            self.assertNotIn("s3cret", str(stopped.exception), bad)
+
+    def test_an_invite_with_a_budget_is_limited_by_money_and_not_by_a_number_of_races(self):
+        with TemporaryDirectory() as tmp:
+            judges, owner = serve.who_of("judges"), serve.who_of("owner")
+            path = Path(tmp) / "l.json"
+
+            def start():
+                return serve.Ledger(path, 100.0, runs_per_code=2, limits={owner: 7}, code_usd={judges: 1.0})
+
+            ledger = start()
+            races = serve.Races(SIX, MODELS, ledger, 0.2, {"judges", "owner"}, set(), runs_dir=Path(tmp) / "runs")
+            session = races.sign_in({"invite": "judges"})
+            # five single races still fit in a dollar at a 20 cent cap; no number of races is counted against it
+            self.assertEqual((session["budget_usd"], session["left_usd"], session["races_left"]), (1.0, 1.0, 5))
+            self.assertNotIn("until_unix", session)
+            self.assertNotIn("budget_usd", races.sign_in({"invite": "owner"}))
+            self.assertEqual(races.sign_in({"invite": "owner"})["races_left"], 7)
+            for _ in range(6):  # far more races than --runs-per-code allows a counted invite
+                ledger.hold(0.2, judges)
+                ledger.settle(0.2, 0.01)
+            self.assertAlmostEqual(ledger.left_for_code(judges), 0.94)
+            self.assertEqual(races.sign_in({"token": session["token"]})["races_left"], 4)
+            # a race starts only if its whole cap fits in what is left of the invite's budget
+            ledger.hold(0.9, judges)  # a batch in flight: 4 cents are left to set aside
+            with self.assertRaises(serve.Refused) as over:
+                ledger.hold(0.2, judges)
+            self.assertEqual(over.exception.status, 402)
+            self.assertIn("$0.04 is left of $1.00", over.exception.reason)
+            # a model reading a description for that sign-in is held against the same budget
+            with self.assertRaises(serve.Refused):
+                ledger.hold_small(0.05, "openai", judges)
+            ledger.hold_small(0.01, "openai", judges)
+            ledger.settle_small(0.01, 0.002, "openai")
+            self.assertAlmostEqual(ledger.left_for_code(judges), 0.038)
+            self.assertEqual(races.sign_in({"token": session["token"]})["races_left"], 0)
+            # the other invite is untouched by any of it, and still has its number
+            ledger.hold(0.2, owner)
+            ledger.settle(0.2, 0.2)
+            self.assertEqual(ledger.races_left(owner), 6)
+            # the server stops with the batch in flight: its whole cap stays counted against the invite
+            again = start()
+            self.assertAlmostEqual(again.left_for_code(judges), 0.038)
+            self.assertEqual(again.state["codes"][judges]["held_usd"], 0.0)
+            # an invite may have both: then whichever runs out first stops it
+            both = serve.Ledger(Path(tmp) / "b.json", 100.0, 2, limits={judges: 1}, code_usd={judges: 1.0})
+            both.hold(0.2, judges)
+            both.settle(0.2, 0.01)
+            with self.assertRaises(serve.Refused) as counted:
+                both.hold(0.2, judges)
+            self.assertEqual(counted.exception.status, 429)
+
+    def test_an_invite_works_only_on_its_days_and_a_session_never_outlives_it(self):
+        with TemporaryDirectory() as tmp:
+            start, until = 1796860800, 1796860800 + 8 * 86400  # 10 December 2026 through 17 December, UTC
+            judges = serve.who_of("judges")
+            ledger = serve.Ledger(Path(tmp) / "l.json", 1.0, 3, code_usd={judges: 1.0})
+            races = serve.Races(SIX, MODELS, ledger, 0.2, {"judges", "owner"}, set(), windows={judges: (start, until)})
+            task = next(iter(races.tasks))
+            ask = {"task": task, "a": MODELS[0], "b": MODELS[1]}
+            # before its first day: refused, and told when (only the holder of the invite is ever told)
+            with self.assertRaises(serve.Refused) as early:
+                races.identify({"invite": "judges"}, now=start - 1)
+            self.assertEqual(early.exception.status, 403)
+            self.assertIn("opens on 10 December 2026", early.exception.reason)
+            self.assertEqual(races.identify({"invite": "judges"}, now=start), judges)
+            self.assertEqual(races.identify({"invite": "judges"}, now=until - 1), judges)
+            with self.assertRaises(serve.Refused) as late:
+                races.identify({"invite": "judges"}, now=until)
+            self.assertIn("ended with 17 December 2026", late.exception.reason)
+            # a session made on the last day ends with the invite, not thirty days later
+            session = races.session_for(judges, now=until - 3600)
+            self.assertEqual((session["expires_unix"], session["until_unix"]), (until, until))
+            self.assertEqual(races.identify({"token": session["token"]}, now=until - 1), judges)
+            with self.assertRaises(serve.Refused):
+                races.identify({"token": session["token"]}, now=until + 1)
+            # a session made early in the window is still refused once the window has closed
+            long = races.session_for(judges, now=start)
+            self.assertLess(long["expires_unix"], start + 31 * 86400)
+            # an invite without days works any day, as before
+            self.assertEqual(races.identify({"invite": "owner"}, now=until + 999), serve.who_of("owner"))
+            with mock.patch.object(serve.time, "time", return_value=start - 5), self.assertRaises(serve.Refused):
+                races.check({**ask, "invite": "judges"})
+            # an invite in another alphabet is a plain refusal, like any wrong one
+            for odd in ("clé-inconnue", "\u2603"):
+                with self.assertRaises(serve.Refused) as refused:
+                    races.identify({"invite": odd})
+                self.assertEqual(refused.exception.status, 403)
+                with self.assertRaises(serve.Refused):
+                    races.identify({"token": odd + "." + odd})
+
     def test_after_a_race_the_import_workflow_is_started_and_a_failure_never_breaks_anything(self):
         with TemporaryDirectory() as tmp:
             races = make(tmp)
@@ -541,6 +657,35 @@ class HttpTests(unittest.TestCase):
             reply = self.post({"task": task, "a": MODELS[0], "b": MODELS[1], "token": session["token"]})
             self.assertIn("event: record", reply.read().decode())
         self.assertEqual(json.load(signin({"token": session["token"]}))["races_left"], 2)
+
+    def test_a_race_started_with_a_budget_invite_is_counted_against_that_budget_at_what_it_cost(self):
+        judges = serve.who_of("judges")
+        self.races.codes.add("judges")
+        self.races.ledger.code_usd[judges] = 0.5
+
+        def signin(ask):
+            request = urllib.request.Request(
+                f"{self.url}/signin", json.dumps(ask).encode(), {"Content-Type": "application/json"}
+            )
+            return json.load(urllib.request.urlopen(request, timeout=10))
+
+        before = signin({"invite": "judges"})
+        self.assertEqual((before["budget_usd"], before["left_usd"], before["races_left"]), (0.5, 0.5, 2))
+        task = next(iter(self.races.tasks))
+        with mock.patch("builtins.print"):
+            text = self.post({"task": task, "a": MODELS[0], "b": MODELS[1], "invite": "judges"}).read().decode()
+        cost = json.loads(text.strip().split("\n\n")[-1].split("data: ", 1)[1])["record"]["body"]["budget"]["spent_usd"]
+        after = signin({"invite": "judges"})
+        self.assertAlmostEqual(after["left_usd"], 0.5 - cost)
+        used = self.races.ledger.state["codes"][judges]
+        self.assertEqual((used["held_usd"], used["spent_usd"]), (0.0, round(cost, 6)))
+        # a batch whose cap does not fit what is left of the invite's budget is refused before anything is spent
+        self.races.ledger.code_usd[judges] = round(cost + 0.1, 6)
+        with self.assertRaises(urllib.error.HTTPError) as refused:
+            self.post({"task": task, "a": MODELS[0], "b": MODELS[1], "invite": "judges", "runs": 4})
+        self.assertEqual(refused.exception.code, 402)
+        self.assertIn("invitation's budget", json.load(refused.exception)["error"])
+        self.assertFalse(self.races.busy.locked())
 
     def test_one_race_at_a_time(self):
         task = next(iter(self.races.tasks))

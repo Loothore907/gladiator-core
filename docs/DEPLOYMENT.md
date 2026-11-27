@@ -54,10 +54,20 @@ uv run python gladiator.py serve                      # this machine only, your 
   read at start-up; the runner asks again every two minutes and offers it once it has a price (`/options`,
   `models_unpriced`). A model that can never be priced still refuses the start.
 - `GET /health` names the engine build that is answering (`engine_commit`), so a deploy can check it.
-- With no invites (`GLADIATOR_RACE_CODES`, comma-separated; `invite:40` gives one its own number of races) it
-  refuses to listen beyond this machine. An invite is exchanged once for a session (`POST /signin`) that lasts
-  30 days; a browser then needs only the session. Sessions are signed with a key made from the invites, so
-  changing the invites signs everyone out. The ledger file records a sign-in by an id, never the invite.
+- With no invites (`GLADIATOR_RACE_CODES`, comma-separated) it refuses to listen beyond this machine. An invite
+  is exchanged once for a session (`POST /signin`) that lasts 30 days; a browser then needs only the session.
+  Sessions are signed with a key made from the invites, so changing the invites signs everyone out. The ledger
+  file records a sign-in by an id, never the invite.
+- An invite carries its own terms, after colons. `invite:40` gives it its own number of races (without one it
+  gets `--runs-per-code`). `invite:usd=40` gives it a budget of its own in dollars instead: everything started
+  with it, races, batches and readings alike, is set aside against that budget before it starts and counted at
+  what it cost, and no number of races or readings applies. `from=2026-12-10` and `until=2026-12-17` are the
+  first and last day it works on (whole days, UTC): outside them the invite and every session made from it are
+  refused, and its holder is told which day it opens or ended. One invite for a group of people whose number
+  is not known is then `invite:usd=40:from=2026-12-10:until=2026-12-17`. The provider budgets and the cap per
+  race still apply to it. The start-up log lists each invite's terms beside five characters of a hash, never a
+  character of the invite; `POST /signin` answers with `budget_usd`, `left_usd` and `until_unix` for such an
+  invite, and `races_left` is then how many single races the budget still covers.
 - `GET /races` lists the live races it has run (record id and seal, task, the two models, who won, who passed,
   what each cost), read back from the sealed records on disk, so a restart forgets none. Public facts only.
 - `GET /records/<run_id>` hands out one filed race's sealed public record, exactly as filed.
