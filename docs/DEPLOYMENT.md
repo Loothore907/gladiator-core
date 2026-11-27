@@ -61,12 +61,31 @@ uv run gladiator serve                                # this machine only, your 
   read at start-up; the runner asks again every two minutes and offers it once it has a price (`/options`,
   `models_unpriced`). A model that can never be priced still refuses the start.
 - `GET /health` names the engine build that is answering (`engine_commit`), so a deploy can check it.
+- **More than one budget per attempt (`--track SUITE=CAP_USD`, repeatable).** A workflow test gives each attempt
+  a hard budget, and an attempt that runs out ends as `over_budget`, which counts against the model. A big model
+  raced under the small-model budget is cut off, not beaten. So a runner can hold more than one set of
+  conditions: its base suite, and each `--track` (a suite with the same tests in the same versions and a larger
+  budget per attempt, and the cap of one race under it: `--track suites/mid_tier.yaml=1.00`).
+  - `providers/placement.yaml` places each model under the suite with the smallest budget it can finish within,
+    and says how: from its own recorded attempts, or estimated from another model's token use at its own
+    prices. A model placed under a suite this runner does not have is raced under the base suite, as before
+    placements existed, so a runner started without `--track` behaves as it always did.
+  - A pair is raced under the larger budget of its two models, so a small model meets a mid-tier one on equal
+    terms. A request may name the conditions (`"track"`), never smaller ones than the pair needs. A batch is
+    played under the base suite.
+  - The cap of a race is its conditions' own (each model has half), and must be at least twice the budget per
+    attempt. The record carries the budget it was played under: results under different budgets are different
+    conditions, and a results store must not pool them.
+  - `/options` lists the conditions (`tracks`: budget per attempt and cap of one race, smallest first) and
+    which each model is raced under (`placed`).
 - **A race its visitor pays for (`--own-keys`, off unless asked for).** A hosted runner can also take a race
   whose request carries the API key of each model's provider (`"keys": {"openrouter": "..."}`), so anyone with
   a key can race without a sign-in and without this server's money. What holds for such a race:
   - It is played with the keys in the request and with no other. A model whose provider has no key in the
     request is refused: it can never fall back on a key this machine holds. The runner needs no key of its own
-    for the models it offers this way (`--own-key-model`, default the `--model` list), and starts with none.
+    for the models it offers this way, and starts with none. Unless named (`--own-key-model`), they are every
+    model placed under conditions this runner has (`providers/placement.yaml`): with the mid-tier track, 23
+    models of four providers.
   - Each key is checked with its provider first, by a call that costs nothing (the provider's list of models;
     for OpenRouter its own question about a key). A key that is refused, or that may not use the model, stops
     the race there: nothing is run, spent or filed, and the visitor is told which of the two it was.

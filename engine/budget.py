@@ -23,12 +23,21 @@ from pathlib import Path
 import yaml
 
 PRICES_FILE = Path(__file__).resolve().parent.parent / "providers" / "prices.yaml"
+PLACEMENT_FILE = PRICES_FILE.with_name("placement.yaml")
 CHARS_PER_TOKEN = 2.5  # conservative; real JSON is usually ~3-4 chars/token
 OVERHEAD_TOKENS = 600  # tool definition + message framing
 
 
 def load_prices():
     return yaml.safe_load(PRICES_FILE.read_text(encoding="utf-8")) or {}
+
+
+def load_placement() -> dict[str, str]:
+    """Which suite's conditions each model is raced under on a race runner: model -> suite name
+    (providers/placement.yaml, which says how each was placed). A model is under the suite with the smallest
+    budget per attempt it can finish a workflow test within."""
+    table = yaml.safe_load(PLACEMENT_FILE.read_text(encoding="utf-8")) or {}
+    return {model: suite for suite, models in table.items() for model in models or []}
 
 
 def price_for(provider: str, model: str, today: datetime.date | None = None) -> dict:
