@@ -16,7 +16,7 @@ SIX = str(Path(__file__).resolve().parent.parent / "suites" / "six_case_mvp.yaml
 MODELS = ["scripted:golden", "scripted:silent", "scripted:invalid"]
 
 
-def make(folder, total=1.0, per_code=3, codes=None, max_usd=0.2, batch_sizes=(4,)):
+def make(folder, total=1.0, per_code=3, codes=None, max_usd=0.2, batch_sizes=(4,), **more):
     ledger = serve.Ledger(Path(folder) / "ledger.json", total, per_code)
     return serve.Races(
         SIX,
@@ -29,6 +29,7 @@ def make(folder, total=1.0, per_code=3, codes=None, max_usd=0.2, batch_sizes=(4,
         batch_sizes=batch_sizes,
         batch_usd_per_run=0.05,
         batch_parallel=3,
+        **more,
     )
 
 
@@ -830,3 +831,299 @@ class HttpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VisitorKeyTests(unittest.TestCase):
+    """A race its visitor pays for (`gladiator serve --own-keys`): the request carries the key, the key is used for
+    that one race, and it is in nothing the server writes, logs or sends back."""
+
+    KEY = "sk-proj-Vis1torKeyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789tail"
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        # a hosted runner: it has invites of its own, and takes own-key races beside them
+        self.races = make(self.tmp.name, codes={"judge-1"}, own_keys=True, own_per_hour=3)
+        self.server = serve.serve(self.races, "127.0.0.1", 0)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.task = next(iter(self.races.tasks))
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.tmp.cleanup()
+
+    def ask(self, **changes):
+        return {"task": self.task, "a": MODELS[0], "b": MODELS[1], "keys": {"scripted": self.KEY}, **changes}
+
+    def post(self, ask, headers=None):
+        request = urllib.request.Request(
+            f"{self.url}/race",
+            json.dumps(ask).encode(),
+            {"Content-Type": "application/json", "Origin": "https://page.example", **(headers or {})},
+        )
+        return urllib.request.urlopen(request, timeout=60)
+
+    def refused(self, ask, headers=None):
+        with self.assertRaises(urllib.error.HTTPError) as no:
+            self.post(ask, headers)
+        return no.exception.code, json.load(no.exception)["error"]
+
+    def everything_written(self):
+        """Every byte under the server's folder: its ledger, its records and their private halves."""
+        return "".join(p.read_text(encoding="utf-8") for p in Path(self.tmp.name).rglob("*") if p.is_file())
+
+    def test_it_is_off_unless_asked_for(self):
+        with TemporaryDirectory() as tmp:
+            plain = make(tmp, codes={"judge-1"})
+            self.assertIsNone(plain.options()["own_keys"])
+            with self.assertRaises(serve.Refused) as no:
+                plain.check(self.ask())
+            self.assertEqual(no.exception.status, 403)
+            with self.assertRaises(serve.Refused), mock.patch("builtins.print"):
+                plain.run(self.ask(), lambda event: None)
+            self.assertEqual(plain.results, [])
+
+    def test_a_race_is_played_with_the_visitors_key_and_none_of_the_servers_money_moves(self):
+        offered = json.load(urllib.request.urlopen(f"{self.url}/options"))["own_keys"]
+        self.assertEqual(offered, {"models": MODELS, "cap_usd_per_race": 0.2, "per_hour": 3})
+        before = json.loads(json.dumps(self.races.ledger.state))
+        handed = []
+        real = serve.providers.create
+
+        def create(contestant, key=None):
+            handed.append((contestant, key))
+            return real(contestant, key)
+
+        with mock.patch("builtins.print") as printed, mock.patch.object(serve.providers, "create", create):
+            reply = self.post(self.ask())  # no invite, no session: the key is what pays
+            sent = reply.read().decode()
+        self.assertEqual(reply.status, 200)
+        self.assertIn("event: record", sent)
+        sealed = json.loads(sent.split("event: record\ndata: ", 1)[1].split("\n\n", 1)[0])["record"]
+        self.assertIs(sealed["body"]["own_keys"], True)  # the record says who paid
+        self.assertEqual(record.sha256(sealed["body"]), sealed["sha256"])
+        # every provider of this race was made with the visitor's key, and with no other
+        self.assertTrue(handed)
+        self.assertEqual({key for _, key in handed}, {self.KEY})
+        # the server's own money: nothing held, nothing spent, no sign-in counted
+        self.assertEqual(self.races.ledger.state, before)
+        self.assertEqual(self.races.ledger.state["spent_usd"], 0.0)
+        # the key is in nothing sent back, written, logged or listed
+        said = " ".join(str(part) for call in printed.call_args_list for part in call.args)
+        listed = urllib.request.urlopen(f"{self.url}/races").read().decode()
+        health = urllib.request.urlopen(f"{self.url}/health").read().decode()
+        filed = self.everything_written()
+        self.assertIn(sealed["body"]["run_id"], filed)  # the race was filed
+        for where, text in (("stream", sent), ("files", filed), ("log", said), ("/races", listed), ("/health", health)):
+            self.assertNotIn(self.KEY, text, where)
+            self.assertNotIn(self.KEY[:12], text, where)
+
+    def test_a_match_given_its_own_keys_never_falls_back_on_this_machines(self):
+        suite = serve.suites.load(SIX)
+        with self.assertRaises(ValueError) as none:
+            serve.runner.run_match(suite, MODELS[0], MODELS[1], 0.2, keys={"openai": self.KEY})
+        self.assertIn("none of them is for scripted", str(none.exception))
+        self.assertNotIn(self.KEY, str(none.exception))
+        with self.assertRaises(ValueError):
+            serve.runner.run_match(suite, MODELS[0], MODELS[1], 0.2, keys={})
+        # and each real provider calls with the key it is handed, whatever the environment holds
+        env = {"ANTHROPIC_API_KEY": "from-the-environment", "OPENAI_API_KEY": "from-the-environment"}
+        with mock.patch.dict("os.environ", {**env, "OPENROUTER_API_KEY": "from-the-environment"}):
+            for contestant in ("anthropic:claude-haiku-5-5", "openai:gpt-6-luna", "openrouter:z-ai/glm-5.3"):
+                made = serve.providers.create(contestant, self.KEY)
+                self.assertEqual(made.client.api_key, self.KEY, contestant)
+                self.assertEqual(made.key, self.KEY, contestant)
+                self.assertEqual(serve.providers.create(contestant).client.api_key, "from-the-environment")
+
+    def test_a_key_its_provider_refuses_stops_the_race_before_anything_is_run_or_filed(self):
+        from providers.base import KeyRefused
+        from providers.scripted import ScriptedProvider
+
+        said = "scripted did not accept this key (AuthenticationError, HTTP 401)."
+        with (
+            mock.patch.object(ScriptedProvider, "check_key", side_effect=KeyRefused("scripted", said)),
+            mock.patch("builtins.print"),
+        ):
+            status, error = self.refused(self.ask())
+        self.assertEqual((status, error), (403, said))
+        self.assertEqual(self.races.results, [])
+        self.assertFalse(list((Path(self.tmp.name) / "runs").glob("*/record.json")))
+        self.assertEqual(self.races.ledger.state["spent_usd"], 0.0)
+        self.assertFalse(self.races.busy.locked())  # the next race can start
+        self.assertNotIn(self.KEY, self.everything_written())
+        # a refused key is counted like a race, so the server is no place to try keys out
+        self.assertEqual(sum(len(v) for v in self.races.own_started.values()), 1)
+
+    def test_why_a_key_was_refused_is_said_without_the_providers_own_words(self):
+        from providers.base import KeyRefused, Provider, hide_key, refusal
+
+        class Echoing(Exception):  # an SDK's error: its message repeats the key, starred out or whole
+            status_code = 401
+
+        echo = Echoing(f"Incorrect API key provided: {self.KEY[:8]}********{self.KEY[-4:]}. Or even {self.KEY}")
+        self.assertEqual(refusal("openai", echo), "openai did not accept this key (Echoing, HTTP 401).")
+        self.assertIn("could not be checked", refusal("openai", TimeoutError("no answer")))
+
+        class Listing(Provider):
+            name = "listing"
+
+            def list_models(self):
+                raise echo
+
+        with self.assertRaises(KeyRefused) as no:
+            Listing("some-model", self.KEY).check_key()
+        self.assertNotIn(self.KEY[:8], no.exception.reason)
+        self.assertNotIn(self.KEY[-4:], no.exception.reason)
+
+        class Serving(Provider):
+            name = "serving"
+
+            def list_models(self):
+                return ["another-model"]
+
+        with self.assertRaises(KeyRefused) as no:
+            Serving("some-model", self.KEY).check_key()
+        self.assertIn("does not serve some-model", no.exception.reason)
+        # text a provider did write is cleaned of the key, whole or starred, and of nothing else
+        self.assertEqual(hide_key(f"bad key {self.KEY} given", self.KEY), "bad key (the key) given")
+        for masked in (f"{self.KEY[:8]}****{self.KEY[-4:]}", f"sk-...{self.KEY[-4:]}", f"********{self.KEY[-4:]}."):
+            cleaned = hide_key(f"Incorrect API key provided: {masked}", self.KEY)
+            self.assertNotIn(self.KEY[-4:], cleaned, masked)
+            self.assertIn("(part of the key)", cleaned, masked)
+        untouched = f"content_sha256 c6373a0385f6f00aa9{self.KEY[-4:]} order ORD-{self.KEY[-4:]}"
+        self.assertEqual(hide_key(untouched, self.KEY), untouched)  # a hash that ends the same way is not a key
+
+    def test_what_a_provider_says_in_the_middle_of_a_race_reaches_no_record_stream_or_log_with_the_key_in_it(self):
+        from providers.base import FatalProviderError
+        from providers.scripted import ScriptedProvider
+
+        echoed = f"openai AuthenticationError: Incorrect API key provided: {self.KEY[:8]}******{self.KEY[-4:]}."
+
+        def refuse(provider, *_, **__):
+            raise FatalProviderError(echoed)
+
+        with mock.patch.object(ScriptedProvider, "open_chat", refuse), mock.patch("builtins.print") as printed:
+            sent = self.post(self.ask()).read().decode()
+        said = " ".join(str(part) for call in printed.call_args_list for part in call.args)
+        filed = self.everything_written()
+        self.assertIn("not_run", sent)
+        for where, text in (("stream", sent), ("files", filed), ("log", said)):
+            self.assertIn("(part of the key)", text, where)
+            self.assertNotIn(self.KEY[:8], text, where)
+            self.assertNotIn(f"*{self.KEY[-4:]}", text, where)
+
+    def test_a_record_that_still_names_a_key_is_never_filed(self):
+        real = serve.runner.run_match
+
+        def leaky(*args, **kwargs):  # a key in a place no cleaning reaches: the name of a field
+            body, operator = real(*args, **kwargs)
+            return {**body, self.KEY: "left behind"}, operator
+
+        with mock.patch.object(serve.runner, "run_match", leaky), mock.patch("builtins.print"):
+            with self.assertRaises(RuntimeError) as stopped:
+                self.races.run(self.ask(), lambda event: None, "203.0.113.5")
+        self.assertNotIn(self.KEY, str(stopped.exception))
+        self.assertFalse(list((Path(self.tmp.name) / "runs").glob("*/record.json")))
+        self.assertEqual(self.races.results, [])
+        self.assertFalse(self.races.busy.locked())
+
+    def test_only_what_the_server_offers_for_such_a_race_and_a_key_for_each_provider(self):
+        asked = []
+        with mock.patch.object(serve.providers, "create", lambda *a, **k: asked.append(a)):
+            for change, part in (
+                ({"a": "openai:gpt-6-luna"}, "list this server offers for a race with your own key"),
+                ({"runs": 4}, "batches are not offered"),
+                ({"b": MODELS[0]}, "two different models"),
+                ({"keys": {}}, "A key for scripted is needed"),
+                ({"keys": {"scripted": "   "}}, "A key for scripted is needed"),
+                ({"keys": {"scripted": "two words"}}, "does not look like a key"),
+                ({"keys": {"scripted": 12345678}}, "A key for scripted is needed"),
+                ({"keys": ["scripted", self.KEY]}, "Send the keys as an object"),
+                ({"task": "nope"}, "Unknown task"),
+                ({"difficulty": "impossible"}, "Difficulty must be one of"),
+            ):
+                status, error = self.refused(self.ask(**change))
+                self.assertEqual(status, 400, change)
+                self.assertIn(part, error, change)
+                self.assertNotIn(self.KEY, error)
+        self.assertEqual(asked, [])  # no provider was asked anything
+        self.assertEqual(self.races.own_started, {})  # and none of it was counted as a race
+        # a key for a provider the race does not use is dropped, not carried along
+        kept = self.races.check(self.ask(keys={"scripted": f"  {self.KEY}  ", "openai": "sk-another-key-entirely"}))
+        self.assertEqual(kept["keys"], {"scripted": self.KEY})
+
+    def test_one_address_may_start_only_so_many_an_hour(self):
+        for n in range(3):
+            self.races.admit_own("203.0.113.5", now=1000.0 + n)
+        with self.assertRaises(serve.Refused) as no:
+            self.races.admit_own("203.0.113.5", now=1100.0)
+        self.assertEqual(no.exception.status, 429)
+        self.assertIn("3 races an hour", no.exception.reason)
+        self.races.admit_own("203.0.113.9", now=1100.0)  # another visitor is not held up by the first
+        self.races.admit_own("203.0.113.5", now=1000.0 + 3601)  # and an hour later the first may again
+        with TemporaryDirectory() as tmp:  # all visitors together have a limit too
+            small = make(tmp, own_keys=True, own_per_hour=5, own_per_hour_all=2)
+            small.admit_own("a", now=1.0)
+            small.admit_own("b", now=2.0)
+            with self.assertRaises(serve.Refused) as full:
+                small.admit_own("c", now=3.0)
+            self.assertEqual(full.exception.status, 429)
+
+    def test_a_visitor_is_told_apart_by_the_header_the_server_was_told_to_trust_and_by_no_other(self):
+        with mock.patch("builtins.print"):
+            # no header was named: one that a caller writes itself is not believed
+            for n in range(3):
+                self.post(self.ask(), {"Fly-Client-IP": f"198.51.100.{n}"}).read()
+            status, _ = self.refused(self.ask(), {"Fly-Client-IP": "198.51.100.77"})
+            self.assertEqual(status, 429)
+            self.assertEqual(list(self.races.own_started), ["127.0.0.1"])
+            # named: each visitor behind the proxy has a count of their own
+            self.races.client_header = "Fly-Client-IP"
+            self.races.own_started.clear()
+            for _ in range(3):
+                self.post(self.ask(), {"Fly-Client-IP": "198.51.100.1"}).read()
+            self.assertEqual(self.refused(self.ask(), {"Fly-Client-IP": "198.51.100.1"})[0], 429)
+            self.assertEqual(self.post(self.ask(), {"Fly-Client-IP": "198.51.100.2"}).status, 200)
+
+    def test_the_command_takes_own_key_races_with_no_key_of_its_own(self):
+        """`gladiator serve --own-keys` on a machine that holds no key at all: it starts, and offers the models a
+        visitor's key can race."""
+        import os
+        import subprocess
+        import sys
+
+        import gladiator
+
+        root = Path(__file__).resolve().parent.parent
+        names = [name for group in gladiator.PROVIDER_KEYS.values() for name in group]
+        env = {k: v for k, v in os.environ.items() if k not in names and k != "GLADIATOR_RACE_CODES"}
+        asked = [sys.executable, str(root / "gladiator.py"), "serve", "--port", "0", "--own-keys"]
+        asked += [
+            "--own-key-model",
+            MODELS[0],
+            "--own-key-model",
+            MODELS[2],
+            "--client-address-header",
+            "Fly-Client-IP",
+        ]
+        with TemporaryDirectory() as tmp:
+            started = subprocess.Popen(
+                [*asked, "--state", tmp],
+                env={**env, **dict.fromkeys(names, ""), "PYTHONUNBUFFERED": "1"},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            try:
+                lines = []
+                for line in started.stdout:
+                    lines.append(line)
+                    if "build page" in line:
+                        break
+                said = "".join(lines)
+                self.assertIn("own keys: a visitor may race with their own key (2 models", said)
+                self.assertIn("counted by Fly-Client-IP", said)
+            finally:
+                started.terminate()
+                started.wait(timeout=30)

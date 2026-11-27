@@ -42,6 +42,9 @@ class ScriptedProvider(Provider):
     def open_chat(self, system, first_message, settings, tools=None):
         return ScriptedChat(self.model, first_message)
 
+    def check_key(self) -> None:
+        return None  # it calls nobody, so there is nothing for a key to be accepted by
+
 
 class ScriptedChat(Chat):
     def __init__(self, mode, first_message):

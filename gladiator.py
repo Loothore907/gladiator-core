@@ -145,7 +145,7 @@ def cmd_serve(args):
         has_key = name == "scripted" or any(os.environ.get(k) for k in PROVIDER_KEYS.get(name, ()))
         has_budget = not budgets or total is not None or name in budgets
         (models if has_key and has_budget else left_out).append(model)
-    if len(models) < 2:
+    if len(models) < 2 and not args.own_keys:  # with --own-keys a visitor's key is enough: none is needed here
         names = ", ".join(keys[0] for keys in PROVIDER_KEYS.values())
         sys.exit(
             "Fewer than two models have both a key and a budget on this machine: nothing to race.\n"
@@ -168,6 +168,11 @@ def cmd_serve(args):
         batch_pass_rate=args.batch_pass_rate,
         after_race=args.after_race_workflow,
         windows=windows,
+        own_keys=args.own_keys,
+        # with their own key a visitor may race any of these, whether or not this machine holds a key for them
+        own_models=args.own_key_model or wanted,
+        own_per_hour=args.own_keys_per_hour,
+        client_header=args.client_address_header,
     )
     reader = args.reader
     if reader:  # the model that reads a signed-in visitor's description on the build page
@@ -219,6 +224,12 @@ def cmd_serve(args):
             said.append("open now")
         dated = terms["from"] is not None or terms["until"] is not None
         out += f"\n  invite {serve.fingerprint(code)}: {', '.join(said)}" + (" (whole days, UTC)" if dated else "")
+    if races.own_keys:
+        out += (
+            f"\n  own keys: a visitor may race with their own key ({len(races.own_models())} models, "
+            f"{races.own_per_hour} races an hour for one address, counted by "
+            f"{args.client_address_header or 'the address of the connection'})"
+        )
     if races.unpriced:  # asked for again while the server runs
         out += "".join(f"\n  not offered until it has a price: {m} ({why})" for m, why in races.unpriced.items())
     holds, counted = ledger.recovered
@@ -742,6 +753,31 @@ def main(argv=None):
         type=float,
         default=0.8,
         help="a batch stops early once a model can no longer pass this share of its scenarios (default 0.8)",
+    )
+    sv.add_argument(
+        "--own-keys",
+        action="store_true",
+        help="also take races a visitor pays for: the request carries the API key of each model's provider, "
+        "which is checked with the provider, used for that one race and never stored, logged or sent back. "
+        "Such a race needs no sign-in and touches none of this server's budgets (default: off)",
+    )
+    sv.add_argument(
+        "--own-key-model",
+        action="append",
+        help="a model a race with the visitor's own key may use (repeatable); default: the same list as --model. "
+        "This machine needs no key of its own for them",
+    )
+    sv.add_argument(
+        "--own-keys-per-hour",
+        type=int,
+        default=12,
+        help="races with their own key one address may start in an hour (default 12)",
+    )
+    sv.add_argument(
+        "--client-address-header",
+        metavar="NAME",
+        help="the header a proxy in front of this server writes the visitor's address into (on Fly.io: "
+        "Fly-Client-IP); without one the address of the connection is used",
     )
     sv.add_argument(
         "--origin",

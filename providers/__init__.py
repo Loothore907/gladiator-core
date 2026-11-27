@@ -23,7 +23,9 @@ def parse(contestant: str) -> tuple[str, str]:
     return provider, model
 
 
-def create(contestant: str):
+def create(contestant: str, key: str | None = None):
+    """The provider for one contestant. `key`: the API key to call with, for a match whose keys were handed over
+    with it (a race someone pays for themselves); without one the provider reads the environment."""
     provider, model = parse(contestant)
     path, cls = PROVIDERS[provider].split(":")
-    return getattr(importlib.import_module(path), cls)(model)
+    return getattr(importlib.import_module(path), cls)(model, key)

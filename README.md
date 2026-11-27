@@ -66,6 +66,8 @@ The runner listens on this machine only. A page served from this machine may cal
 result to its record: its README has the two commands); a request sent by a page from anywhere else starts
 nothing. `--model provider:model` (repeatable) replaces the list with models of your choosing, each of which
 needs a price. Hosting one for other people is a different matter: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+A hosted runner can also take races its visitors pay for (`--own-keys`): the key comes with the request, is
+checked with its provider, used for that one race and never stored, logged or sent back.
 
 ## Choosing models
 

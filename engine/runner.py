@@ -142,7 +142,7 @@ def run_node(
     try:
         chat = provider.open_chat(system, canonical({"type": "start", "case": packet}), settings, module.tools())
     except ProviderError as e:
-        chat, termination, error = None, "provider_error", str(e)
+        chat, termination, error = None, "provider_error", provider.hide(e)
     for turn in range(module.max_actions if chat else 0):
         if time.monotonic() - started > limits.get("attempt_time_limit_s", NODE_TIME_LIMIT_S):
             termination = "time_limit"
@@ -162,7 +162,7 @@ def run_node(
             raise
         except ProviderError as e:
             budget.release(held)
-            termination, error = "provider_error", str(e)
+            termination, error = "provider_error", provider.hide(e)
             break
         call_s = time.monotonic() - t0
         u = last_usage = reply.usage
@@ -323,6 +323,7 @@ def run_contestant(
     parallel: int = 1,
     halt: dict | None = None,
     after_attempt=None,
+    key: str | None = None,
 ):
     """Play every node `repeats` times (a fresh session each time). Results are node-major:
     node1 attempt1..N, node2 attempt1..N, ... so both contestants' lists line up pair by pair.
@@ -334,7 +335,7 @@ def run_contestant(
     `after_attempt(side, result)` is asked after each attempt that was played; if it returns a reason, that
     reason goes into `halt` (shared by both contestants) and no further attempt starts on either side. Attempts
     already under way finish. The ones never started are recorded as not run, with the reason."""
-    provider = providers.create(contestant)
+    provider = providers.create(contestant, key)
     price = price_for(*providers.parse(contestant))
     results, operator = [], []
     state = {"dead": None}
@@ -363,14 +364,17 @@ def run_contestant(
                 emit,
             )
         except FatalProviderError as e:
-            emit("attempt_end", passed=False, termination="not_run", error=str(e))
-            state["dead"] = str(e)
-            say(f"  [{side}] {contestant}: stopping - {e}")
-            return not_run(node, str(e), attempt), None
+            # A provider that refuses a key often repeats part of it. What it said goes into the stream, the log
+            # and the sealed record, so the key is taken out first (the same below, traceback included).
+            why = provider.hide(e)
+            emit("attempt_end", passed=False, termination="not_run", error=why)
+            state["dead"] = why
+            say(f"  [{side}] {contestant}: stopping - {why}")
+            return not_run(node, why, attempt), None
         except Exception as e:  # a bug or unexpected SDK error: record it, keep the run going
-            dead = state["dead"] = f"unexpected error: {type(e).__name__}: {e}"
+            dead = state["dead"] = provider.hide(f"unexpected error: {type(e).__name__}: {e}")
             emit("attempt_end", passed=False, termination="not_run", error=dead)
-            say(f"  [{side}] {contestant}: {dead}\n{traceback.format_exc()}")
+            say(f"  [{side}] {contestant}: {dead}\n{provider.hide(traceback.format_exc())}")
             return not_run(node, dead, attempt), None
         public["attempt"] = op["attempt"] = attempt
         emit(
@@ -400,7 +404,7 @@ def run_contestant(
         if parallel > 1 and repeats > 1:
             # each attempt at once gets a client of its own: nothing is shared between sessions but the budget
             with ThreadPoolExecutor(max_workers=parallel) as pool:
-                played = list(pool.map(lambda n, node=node: play(node, n, providers.create(contestant)), attempts))
+                played = list(pool.map(lambda n, node=node: play(node, n, providers.create(contestant, key)), attempts))
         else:
             played = [play(node, n, provider) for n in attempts]
         for public, op in played:
@@ -422,9 +426,15 @@ def run_match(
     on_event=None,
     parallel: int = 1,
     after_attempt=None,
+    keys: dict | None = None,
 ):
     """on_event: optional callback given one dict per event while the match runs (match_start, attempt_start,
     step, attempt_end, match_end), for a live view. It sees only public facts and cannot affect the match.
+
+    keys: API keys handed over with this match, by provider name ({"openrouter": "..."}), for a match someone
+    pays for themselves. When given, each contestant calls with the key for its provider and with no other:
+    a contestant whose provider has none is refused, so such a match can never fall back on a key from this
+    machine's environment. The keys are used and dropped: they are in nothing this returns or reports.
 
     side_overrides: optional per-contestant settings, e.g. {"A": {"effort": "high"}, "B": {"effort": "medium"}}.
     Default is identical settings for both (a fair head-to-head). Unequal settings are allowed for calibration
@@ -436,11 +446,18 @@ def run_match(
     if repeats < 1:
         raise ValueError("repeats must be at least 1")
     # Fail fast, before any spending, if a price is missing or a key is not set.
+    key_for = {}
     for c in (contestant_a, contestant_b):
-        price_for(*providers.parse(c))
+        name = providers.parse(c)[0]
+        price_for(name, providers.parse(c)[1])
+        if keys is not None and not keys.get(name):
+            raise ValueError(f"This match was given its own keys, and none of them is for {name}.")
+        key_for[c] = (keys or {}).get(name)
         try:
-            providers.create(c)
+            providers.create(c, key_for[c])
         except Exception as e:
+            if keys is not None:  # never the environment's key in place of one that was handed over
+                raise ValueError(f"Cannot set up {c} with the key given for {name} ({type(e).__name__}).") from None
             raise SystemExit(
                 f"Cannot set up {c}: {e}\nCheck the API key for that provider in your .env file (see .env.example)."
             ) from None
@@ -472,6 +489,7 @@ def run_match(
             parallel,
             halt,
             after_attempt,
+            key_for[contestant_a],
         )
         fb = pool.submit(
             run_contestant,
@@ -486,6 +504,7 @@ def run_match(
             parallel,
             halt,
             after_attempt,
+            key_for[contestant_b],
         )
         results_a, operator_a = fa.result()
         results_b, operator_b = fb.result()
@@ -518,13 +537,13 @@ def run_match(
             "A": {
                 "id": contestant_a,
                 "price_per_mtok": price_for(*providers.parse(contestant_a)),
-                "api_params": providers.create(contestant_a).sent_settings(sample["A"]),
+                "api_params": providers.create(contestant_a, key_for[contestant_a]).sent_settings(sample["A"]),
                 "results": results_a,
             },
             "B": {
                 "id": contestant_b,
                 "price_per_mtok": price_for(*providers.parse(contestant_b)),
-                "api_params": providers.create(contestant_b).sent_settings(sample["B"]),
+                "api_params": providers.create(contestant_b, key_for[contestant_b]).sent_settings(sample["B"]),
                 "results": results_b,
             },
         },
