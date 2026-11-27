@@ -34,15 +34,22 @@ and streams it as it happens (`engine/serve.py`). It still needs no database: it
 ledger file and the records of the races it ran.
 
 ```bash
-uv run python gladiator.py serve                      # this machine only, your own keys from .env
+uv run gladiator serve                                # this machine only, your own key from .env
 ```
+- **On your own machine it needs one key and no options.** Any one provider's key in `.env` gives two models to
+  race (the README lists which), under a cap of $0.25 a race and $5.00 in all. It listens on this machine only
+  and asks for no sign-in. A page served from this machine (`http://localhost:8000` and the like) may call it
+  without being named. A request that names any other page as its sender starts nothing: a browser sends a
+  plain request from any page without asking first, and nothing but the address would stand between that page
+  and the keys.
 - A race is built from safe choices only: a task from the base suite's locked challenges, two models from the
   server's list, a difficulty level and a scoring profile. Free text never reaches the engine.
 - Money is guarded three times: a hard cap per race, limits the server will not go past (a race starts only if
   its whole cap still fits), and one race at a time. The limits are a total (`--total-usd`), a budget per
   provider (`--provider-usd openrouter=30`, repeatable), or both. A model is offered only while its provider
-  can cover one more race and this server holds that provider's key; `/options` shows each budget and what is
-  left of it.
+  can cover one more race and this server holds that provider's key; `/options` shows the cap of one race, each
+  budget and what is left of it, and the total and what is left of that, so a page can say what a race may
+  cost before it is started.
 - A stop cannot lose money from the count. Every reservation is written to the ledger file while it is open. One
   still open at start-up belongs to a race that was running when the process stopped (a deploy, a crash, the
   host stopping the machine): nobody knows what it cost, so its whole cap is counted, as for a match that dies
@@ -79,7 +86,8 @@ uv run python gladiator.py serve                      # this machine only, your 
   last message carries the answer key only for fresh worlds.
 - A connection that sends or takes nothing for 30 seconds is closed, so silent callers cannot fill the places
   the host allows at one time. A race does not depend on its viewer's connection.
-- A browser page on another address must be named with `--origin`.
+- A browser page on another address must be named with `--origin`. A hosted runner (one with invites) allows
+  only the pages it was started with.
 
 ### The build page (a test for your own flow)
 

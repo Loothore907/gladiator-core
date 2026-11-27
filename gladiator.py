@@ -38,10 +38,15 @@ PROVIDER_KEYS = {
     "openrouter": ("OPENROUTER_API_KEY",),
 }
 
-# The models a live race may use unless told otherwise: small and cheap, each with a listed or published price.
+# The models a live race may use unless told otherwise, each with a listed or published price. Every provider
+# has two, so one provider's key alone is enough to race a pair. The second Anthropic and OpenAI models are a
+# size up from the small ones: on the four workflow tests their dearest recorded attempt cost $0.07 and $0.03,
+# inside the base suite's $0.12 limit per attempt.
 DEFAULT_RACE_MODELS = [
     "anthropic:claude-haiku-5-5",
+    "anthropic:claude-sonnet-5-5",
     "openai:gpt-6-luna",
+    "openai:gpt-6.1-terra",
     "google:gemini-3.1-flash-lite",
     "google:gemini-3.5-flash-lite",
     "openrouter:deepseek/deepseek-v4.1-flash-1017",
@@ -141,7 +146,12 @@ def cmd_serve(args):
         has_budget = not budgets or total is not None or name in budgets
         (models if has_key and has_budget else left_out).append(model)
     if len(models) < 2:
-        sys.exit("Fewer than two models have both a key and a budget on this machine: nothing to race.")
+        names = ", ".join(keys[0] for keys in PROVIDER_KEYS.values())
+        sys.exit(
+            "Fewer than two models have both a key and a budget on this machine: nothing to race.\n"
+            f"A key is read from the environment or from {ROOT / '.env'} (copy .env.example): one of {names}.\n"
+            "Any one of them is enough for a race."
+        )
     state = Path(args.state)
     ledger = serve.Ledger(state / "race_ledger.json", total, args.runs_per_code, budgets, limits, code_usd)
     races = serve.Races(
@@ -181,7 +191,7 @@ def cmd_serve(args):
                 keys[name] = key
         spaces = hosted.Spaces(races, state, keys, public_url=args.public_url or "")
     server = serve.serve(races, args.host, args.port, forks, spaces)
-    who = f"{len(codes)} invite(s)" if codes else "no invites: this machine only"
+    who = f"{len(codes)} invite(s)" if codes else "no invites: this machine only, and pages served from it"
     limit = f"${total:.2f} in total" if total is not None else "the provider budgets"
     per = "".join(
         f"\n  budget {b['provider']}: ${b['left_usd']:.2f} left of ${b['limit_usd']:.2f}" for b in races.budgets()
@@ -678,7 +688,10 @@ def main(argv=None):
         help="base suite: its challenges and settings are what a race can use",
     )
     sv.add_argument(
-        "--model", action="append", help="a model a race may use (repeatable); default: the small, cheap set"
+        "--model",
+        action="append",
+        help="a model a race may use (repeatable); default: two low-cost models for each provider, of which "
+        "those whose provider's key is on this machine are offered",
     )
     sv.add_argument("--max-usd", type=float, default=0.25, help="hard cap for one race in USD (half per model)")
     sv.add_argument(
@@ -731,7 +744,10 @@ def main(argv=None):
         help="a batch stops early once a model can no longer pass this share of its scenarios (default 0.8)",
     )
     sv.add_argument(
-        "--origin", action="append", help="a web origin allowed to call this server from a browser (repeatable)"
+        "--origin",
+        action="append",
+        help="a web origin allowed to call this server from a browser (repeatable). A runner with no invites "
+        "needs none for a page served from this machine (http://localhost:8000 and the like)",
     )
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8787)
