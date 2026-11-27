@@ -1127,3 +1127,198 @@ class VisitorKeyTests(unittest.TestCase):
             finally:
                 started.terminate()
                 started.wait(timeout=30)
+
+
+SMALL = str(Path(__file__).resolve().parent.parent / "suites" / "small_tier.yaml")
+MID = str(Path(__file__).resolve().parent.parent / "suites" / "mid_tier.yaml")
+# for these tests: one stand-in player that fits the small budget and two that need the larger one
+PLACED = {MODELS[0]: "small-tier", MODELS[1]: "mid-tier", MODELS[2]: "mid-tier", "scripted:outage": "small-tier"}
+FOUR = [*MODELS, "scripted:outage"]
+
+
+def tiered(folder, tracks=((MID, 1.0),), max_usd=0.4, **more):
+    """A runner on the four workflow tests under the small budget, with the mid-tier one beside it."""
+    ledger = serve.Ledger(Path(folder) / "ledger.json", 5.0, 10)
+    with mock.patch.object(serve, "load_placement", return_value=dict(PLACED)):
+        return serve.Races(
+            SMALL, FOUR, ledger, max_usd, None, set(), runs_dir=Path(folder) / "runs", tracks=list(tracks), **more
+        )
+
+
+class ConditionsTests(unittest.TestCase):
+    """A runner can race under more than one budget per attempt (`--track`). A model is raced under the budget it
+    is placed under, a pair under the larger of its two, and a race says which it was."""
+
+    def test_the_runner_says_which_budgets_it_has_and_which_each_model_is_raced_under(self):
+        with TemporaryDirectory() as tmp:
+            races = tiered(tmp, own_keys=True)
+            offered = races.options()
+            self.assertEqual(
+                offered["tracks"],
+                [
+                    {"id": "small-tier", "attempt_usd": 0.12, "cap_usd_per_race": 0.4},
+                    {"id": "mid-tier", "attempt_usd": 0.4, "cap_usd_per_race": 1.0},
+                ],
+            )
+            self.assertEqual(offered["placed"], PLACED)
+            self.assertEqual(races.track_for(MODELS[0], "scripted:outage"), "small-tier")
+            self.assertEqual(races.track_for(MODELS[0], MODELS[1]), "mid-tier")  # the larger of the two
+            self.assertEqual(races.track_for(MODELS[2], MODELS[1]), "mid-tier")
+            # with their own key a visitor may race every model placed under a budget this runner has
+            self.assertEqual(sorted(offered["own_keys"]["models"]), sorted(PLACED))
+
+    def test_without_a_second_budget_everything_is_raced_under_the_base_suite_as_before(self):
+        with TemporaryDirectory() as tmp:
+            races = tiered(tmp, tracks=(), own_keys=True)
+            self.assertEqual([t["id"] for t in races.options()["tracks"]], ["small-tier"])
+            self.assertEqual(set(races.options()["placed"].values()), {"small-tier"})
+            task = next(iter(races.tasks))
+            self.assertEqual(races.check({"task": task, "a": MODELS[1], "b": MODELS[2]})["track"], "small-tier")
+            self.assertEqual(races.cap_for(1, "small-tier"), 0.4)
+            # and a visitor's own key is offered only the models that fit a budget this runner has
+            self.assertEqual(sorted(races.own_models()), sorted([MODELS[0], "scripted:outage"]))
+
+    def test_a_pair_is_raced_under_the_larger_budget_of_its_two_and_never_under_a_smaller_one(self):
+        with TemporaryDirectory() as tmp:
+            races = tiered(tmp)
+            task = next(iter(races.tasks))
+            small = {"task": task, "a": MODELS[0], "b": "scripted:outage"}
+            mixed = {"task": task, "a": MODELS[0], "b": MODELS[1]}
+            self.assertEqual(races.check(small)["track"], "small-tier")
+            self.assertEqual(races.check(mixed)["track"], "mid-tier")  # unnamed: what the pair needs
+            self.assertEqual(races.check({**mixed, "track": "mid-tier"})["track"], "mid-tier")
+            # two small models may be raced under the larger budget when that is asked for
+            self.assertEqual(races.check({**small, "track": "mid-tier"})["track"], "mid-tier")
+            with self.assertRaises(serve.Refused) as no:
+                races.check({**mixed, "track": "small-tier"})
+            self.assertEqual(no.exception.status, 400)
+            self.assertIn(MODELS[1], no.exception.reason)
+            self.assertIn("$0.40 an attempt", no.exception.reason)
+            self.assertIn("cut off", no.exception.reason)
+            with self.assertRaises(serve.Refused) as unknown:
+                races.check({**small, "track": "frontier"})
+            self.assertIn("small-tier, mid-tier", unknown.exception.reason)
+
+    def test_a_batch_is_played_under_the_base_suite_as_before(self):
+        with TemporaryDirectory() as tmp:
+            races = tiered(tmp, batch_sizes=(4,), batch_usd_per_run=0.05)
+            task = next(iter(races.tasks))
+            batch = {"task": task, "a": MODELS[1], "b": MODELS[2], "runs": 4}
+            self.assertEqual(races.check(batch)["track"], "small-tier")
+            with self.assertRaises(serve.Refused) as no:
+                races.check({**batch, "track": "mid-tier"})
+            self.assertIn("base conditions", no.exception.reason)
+            self.assertEqual(races.cap_for(4, "small-tier"), 0.2)
+
+    def test_a_race_is_capped_and_recorded_under_the_budget_it_was_played_under(self):
+        with TemporaryDirectory() as tmp:
+            races = tiered(tmp)
+            task = next(iter(races.tasks))
+            with mock.patch("builtins.print"):
+                mid, _ = races.run({"task": task, "a": MODELS[0], "b": MODELS[1]}, lambda event: None)
+                small, _ = races.run({"task": task, "a": MODELS[0], "b": "scripted:outage"}, lambda event: None)
+            for sealed, budget, cap, suite in ((mid, 0.4, 1.0, "mid_tier.yaml"), (small, 0.12, 0.4, "small_tier.yaml")):
+                body = sealed["body"]
+                self.assertEqual(body["settings"]["defaults"]["attempt_budget_usd"], budget)
+                self.assertEqual(body["budget"]["cap_usd"], cap)
+                self.assertEqual(body["budget"]["per_contestant_cap_usd"], cap / 2)
+                self.assertIn(suite, body["suite"]["path"])
+                # the same test in the same version under both: only the budget differs
+                self.assertEqual(body["suite"]["order"], [task])
+            self.assertEqual(mid["body"]["suite"]["challenges"], small["body"]["suite"]["challenges"])
+
+    def test_the_servers_own_budget_must_cover_the_cap_of_the_larger_budget(self):
+        with TemporaryDirectory() as tmp:
+            ledger = serve.Ledger(Path(tmp) / "ledger.json", 0.5, 10)  # enough for a small race, not a mid one
+            with mock.patch.object(serve, "load_placement", return_value=dict(PLACED)):
+                races = serve.Races(
+                    SMALL, FOUR, ledger, 0.4, None, set(), runs_dir=Path(tmp) / "runs", tracks=[(MID, 1.0)]
+                )
+            task = next(iter(races.tasks))
+            with self.assertRaises(serve.Refused), mock.patch("builtins.print"):
+                races.run({"task": task, "a": MODELS[0], "b": MODELS[1]}, lambda event: None)
+            self.assertEqual(ledger.state["spent_usd"], 0.0)
+            with mock.patch("builtins.print"):
+                races.run({"task": task, "a": MODELS[0], "b": "scripted:outage"}, lambda event: None)
+
+    def test_a_second_budget_that_does_not_fit_stops_the_start(self):
+        with TemporaryDirectory() as tmp:
+            for tracks, part in (
+                ([(SIX, 1.0)], "same tests"),
+                ([(MID, 0.5)], "at least twice its budget"),
+                ([(MID, 1.0), (MID, 1.0)], "already has conditions named mid-tier"),
+            ):
+                with self.assertRaises(SystemExit) as stopped:
+                    tiered(tmp, tracks=tracks)
+                self.assertIn(part, str(stopped.exception), tracks)
+            ledger = serve.Ledger(Path(tmp) / "other.json", 5.0, 10)
+            with self.assertRaises(SystemExit) as smaller:  # the base suite must be the smallest budget
+                serve.Races(MID, FOUR, ledger, 1.0, None, set(), tracks=[(SMALL, 1.0)])
+            self.assertIn("must be larger", str(smaller.exception))
+
+    def test_every_placed_model_has_a_price_and_a_suite_and_none_is_placed_twice(self):
+        import yaml
+
+        from engine.budget import PLACEMENT_FILE, load_placement, load_prices
+
+        table = yaml.safe_load(PLACEMENT_FILE.read_text(encoding="utf-8"))
+        listed = [model for models in table.values() for model in models]
+        self.assertEqual(len(listed), len(set(listed)), "a model is placed under two budgets")
+        self.assertEqual(load_placement(), {m: suite for suite, models in table.items() for m in models})
+        root = Path(__file__).resolve().parent.parent
+        budgets = {}
+        for suite in table:
+            data = yaml.safe_load((root / "suites" / f"{suite.replace('-', '_')}.yaml").read_bytes())
+            self.assertEqual(data["suite"], suite)
+            budgets[suite] = data["defaults"]["attempt_budget_usd"]
+        self.assertLess(budgets["small-tier"], budgets["mid-tier"])
+        prices = load_prices()
+        for model in listed:
+            name, model_id = providers.parse(model)
+            if name != "openrouter":  # its prices are read from its published list when a runner starts
+                self.assertIn(model_id, prices[name], f"{model} is placed but has no price")
+            self.assertFalse(model_id.startswith("~") or model_id.endswith("-latest"), f"{model} is a floating alias")
+        # and a real pair: the small Claude meets the mid-tier one under the mid-tier budget
+        with TemporaryDirectory() as tmp:
+            ledger = serve.Ledger(Path(tmp) / "ledger.json", 5.0, 10)
+            pair = ["anthropic:claude-haiku-5-5", "anthropic:claude-sonnet-5-5", "openai:gpt-6-luna"]
+            races = serve.Races(SMALL, pair, ledger, 0.4, None, set(), tracks=[(MID, 1.0)])
+            self.assertEqual(races.track_for(pair[0], pair[1]), "mid-tier")
+            self.assertEqual(races.track_for(pair[0], pair[2]), "small-tier")
+
+    def test_the_command_takes_a_second_budget_and_says_what_it_has(self):
+        import os
+        import subprocess
+        import sys
+
+        root = Path(__file__).resolve().parent.parent
+        asked = [sys.executable, str(root / "gladiator.py"), "serve", "--port", "0", "--model", MODELS[0]]
+        asked += ["--model", MODELS[2], "--track", f"{MID}=1.00"]
+        with TemporaryDirectory() as tmp:
+            started = subprocess.Popen(
+                [*asked, "--state", tmp],
+                env={**os.environ, "GLADIATOR_RACE_CODES": "", "PYTHONUNBUFFERED": "1"},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            try:
+                lines = []
+                for line in started.stdout:
+                    lines.append(line)
+                    if "build page" in line:
+                        break
+                said = "".join(lines)
+                self.assertIn(
+                    "conditions: small-tier ($0.12 an attempt, cap $0.25 a race); "
+                    "mid-tier ($0.40 an attempt, cap $1.00 a race)",
+                    said,
+                )
+            finally:
+                started.terminate()
+                started.wait(timeout=30)
+            wrong = subprocess.run(
+                [*asked[:-1], "suites/mid_tier.yaml", "--state", tmp], capture_output=True, text=True
+            )
+            self.assertNotEqual(wrong.returncode, 0)
+            self.assertIn("SUITE=CAP_USD", wrong.stderr + wrong.stdout)

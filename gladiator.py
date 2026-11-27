@@ -135,6 +135,13 @@ def cmd_serve(args):
         if name not in providers.PROVIDERS or not amount:
             sys.exit(f"--provider-usd takes provider=amount, e.g. openrouter=30 (got {entry!r})")
         budgets[name] = float(amount)
+    tracks = []  # more conditions than the base suite's: SUITE=CAP, the suite file and the cap of one race under it
+    for entry in args.track or []:
+        path, _, cap = entry.partition("=")
+        try:
+            tracks.append((path, float(cap)))
+        except ValueError:
+            sys.exit(f"--track takes SUITE=CAP_USD, e.g. suites/mid_tier.yaml=1.00 (got {entry!r})")
     # with budgets per provider and no total asked for, the budgets are the limits
     total = args.total_usd if args.total_usd is not None else (None if budgets else 5.0)
     wanted = args.model or DEFAULT_RACE_MODELS
@@ -169,8 +176,10 @@ def cmd_serve(args):
         after_race=args.after_race_workflow,
         windows=windows,
         own_keys=args.own_keys,
-        # with their own key a visitor may race any of these, whether or not this machine holds a key for them
-        own_models=args.own_key_model or wanted,
+        # with their own key a visitor may race these, whether or not this machine holds a key for them
+        # (unnamed: every model placed under conditions this runner has, providers/placement.yaml)
+        own_models=args.own_key_model,
+        tracks=tracks,
         own_per_hour=args.own_keys_per_hour,
         client_header=args.client_address_header,
     )
@@ -224,6 +233,13 @@ def cmd_serve(args):
             said.append("open now")
         dated = terms["from"] is not None or terms["until"] is not None
         out += f"\n  invite {serve.fingerprint(code)}: {', '.join(said)}" + (" (whole days, UTC)" if dated else "")
+    conditions = ""
+    if len(races.tracks) > 1:  # which budget per attempt a race can be played under, and the cap of one race
+        said = []
+        for name in races.track_order:
+            each = races.tracks[name]
+            said.append(f"{name} (${each['attempt_usd']:.2f} an attempt, cap ${each['cap_usd']:.2f} a race)")
+        conditions = "\n  conditions: " + "; ".join(said)
     if races.own_keys:
         out += (
             f"\n  own keys: a visitor may race with their own key ({len(races.own_models())} models, "
@@ -241,7 +257,7 @@ def cmd_serve(args):
     print(
         f"Gladiator race runner on http://{args.host}:{server.server_address[1]}  ({who})\n"
         f"  tasks: {', '.join(races.tasks)}\n  models: {', '.join(races.models)}\n"
-        f"  cap ${args.max_usd:.2f} per race, ${ledger.left():.2f} left of {limit}{per}{out}\n"
+        f"  cap ${args.max_usd:.2f} per race, ${ledger.left():.2f} left of {limit}{per}{conditions}{out}\n"
         f"  build page: /build  (descriptions read by {reader or 'nobody: matched by their words'}; "
         f"creating open to {'everyone' if args.open_create else 'signed-in visitors'})"
         + (
@@ -755,6 +771,14 @@ def main(argv=None):
         help="a batch stops early once a model can no longer pass this share of its scenarios (default 0.8)",
     )
     sv.add_argument(
+        "--track",
+        action="append",
+        metavar="SUITE=CAP_USD",
+        help="also offer the conditions of this suite (the same tests under a larger budget per attempt), with "
+        "this cap for one race under them, e.g. suites/mid_tier.yaml=1.00 (repeatable). A model is raced under "
+        "the suite it is placed under (providers/placement.yaml), a pair under the larger of its two",
+    )
+    sv.add_argument(
         "--own-keys",
         action="store_true",
         help="also take races a visitor pays for: the request carries the API key of each model's provider, "
@@ -764,8 +788,8 @@ def main(argv=None):
     sv.add_argument(
         "--own-key-model",
         action="append",
-        help="a model a race with the visitor's own key may use (repeatable); default: the same list as --model. "
-        "This machine needs no key of its own for them",
+        help="a model a race with the visitor's own key may use (repeatable); default: every model placed under "
+        "conditions this runner has (providers/placement.yaml). This machine needs no key of its own for them",
     )
     sv.add_argument(
         "--own-keys-per-hour",

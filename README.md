@@ -55,7 +55,10 @@ uv run gladiator serve       # http://127.0.0.1:8787, this machine only
 | `OPENAI_API_KEY` | `gpt-6-luna`, `gpt-6.1-terra` |
 | `GEMINI_API_KEY` | `gemini-3.1-flash-lite`, `gemini-3.5-flash-lite` |
 
-With more than one key every model above whose key is there is offered, across providers. What it can cost is
+With more than one key every model above whose key is there is offered, across providers. Started with
+`--track suites/mid_tier.yaml=1.00` the runner also holds the mid-tier budget ($0.40 an attempt, at most $1.00 a
+race), and a pair with a mid-tier model in it is raced under that one: it is the budget such a model can finish
+within, and the one its recorded matches were played under. What it can cost is
 fixed before it starts: at most $0.25 for a race and $5.00 in all, after which the runner starts nothing more
 (`--max-usd`, `--total-usd`). On the project's own matches a race between two of the small models cost about a
 cent, and one with Sonnet 5.5 in it about six. The key stays on your machine and is sent to its own provider

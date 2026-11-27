@@ -79,7 +79,7 @@ import yaml
 import providers
 from engine import blueprint, packages, record, runner, session
 from engine import suite as suites
-from engine.budget import price_for
+from engine.budget import load_placement, price_for
 from engine.validate import plain_problems, plain_summary
 from providers.base import KeyRefused, PriceUnavailable, hide_key
 from scorers import components
@@ -529,6 +529,7 @@ class Races:
         own_per_hour: int = 12,
         own_per_hour_all: int = 120,
         client_header: str | None = None,
+        tracks: list[tuple[str, float]] | None = None,
     ):
         # Where a request's own address is read from. Behind a host's proxy every connection comes from the
         # proxy, which writes the visitor's address into a header: name that header here (on Fly.io,
@@ -543,7 +544,6 @@ class Races:
         # no key of its own for them. `own_per_hour`: such races one address may start in an hour, and
         # `own_per_hour_all` all addresses together, so nobody can keep the one place a race has to themselves.
         self.own_keys = bool(own_keys)
-        self.own_wanted = list(own_models or models) if own_keys else []
         self.own_per_hour, self.own_per_hour_all = int(own_per_hour), int(own_per_hour_all)
         self.own_started: dict[str, list[float]] = {}
         self.own_lock = threading.Lock()
@@ -576,6 +576,29 @@ class Races:
                 "status": node["provenance"].get("status"),
                 "levels": [lv for lv in LIVE_LEVELS if lv in offered] or ["standard"],
             }
+        # The conditions a race can be played under, smallest budget per attempt first. The base suite is one;
+        # each `tracks` entry (a suite file and the cap of one race under it) adds another with the same tests and
+        # a larger budget per attempt, for models that would be cut off under the base one. A model is raced under
+        # the suite it is placed under (providers/placement.yaml) when this runner has it, and under the base
+        # suite otherwise; a pair under the larger of its two. Results under different budgets are different
+        # conditions and are never pooled, so a race says which it was played under.
+        self.base_track = str(self.base.get("suite") or "base")
+        self.tracks: dict[str, dict] = {
+            self.base_track: {
+                "path": base_suite,
+                "base": self.base,
+                "attempt_usd": (self.base.get("defaults") or {}).get("attempt_budget_usd"),
+                "cap_usd": float(max_usd),
+            }
+        }
+        for path, cap in tracks or []:
+            self._add_track(path, float(cap))
+        self.track_order = sorted(self.tracks, key=lambda name: self.tracks[name]["attempt_usd"] or 0.0)
+        self.placement = load_placement()
+        # Models a visitor's own key may race: those named for it; else every model placed under a suite this
+        # runner has; else (a base suite no placement names) the server's own list.
+        placed_here = [m for m, suite in self.placement.items() if suite in self.tracks]
+        self.own_wanted = list(own_models or placed_here or models) if own_keys else []
         # A model without a price cannot be capped, so it is never offered. One that can never be priced (not in
         # the price table, a floating alias) is a mistake in how the server was started: refuse now. One whose
         # price is read from OpenRouter's public list and cannot be read this minute is left out, said so, and
@@ -706,13 +729,66 @@ class Races:
             for name, limit in sorted(self.ledger.by_provider.items())
         ]
 
-    def cap_for(self, runs: int) -> float:
-        """The hard cap of one request: a race's, or a batch's (so much per run)."""
-        return self.max_usd if runs <= 1 else round(self.batch_usd_per_run * runs, 6)
+    def cap_for(self, runs: int, track: str | None = None) -> float:
+        """The hard cap of one request: a race's under its conditions, or a batch's (so much per run)."""
+        if runs <= 1:
+            return self.tracks[track or self.base_track]["cap_usd"]
+        return round(self.batch_usd_per_run * runs, 6)
 
-    def affordable(self, model: str, runs: int = 1) -> bool:
+    def affordable(self, model: str, runs: int = 1, track: str | None = None) -> bool:
         left = self.ledger.left_for(providers.parse(model)[0])
-        return left is None or left + 1e-9 >= self.cap_for(runs)
+        return left is None or left + 1e-9 >= self.cap_for(runs, track)
+
+    # ---- the conditions a race is played under ---------------------------------------------------------------
+    def _add_track(self, path: str, cap: float) -> None:
+        """One more set of conditions: the same tests as the base suite under a larger budget per attempt."""
+        base = yaml.safe_load(Path(path).read_bytes())
+        loaded = suites.load(path)
+        name = str(base.get("suite") or path)
+        budget = (base.get("defaults") or {}).get("attempt_budget_usd")
+        smallest = self.tracks[self.base_track]["attempt_usd"]
+        if name in self.tracks:
+            raise SystemExit(f"--track {path}: this runner already has conditions named {name}.")
+        mine = {node["id"]: node.get("challenge") for node in loaded["nodes"]}
+        if any(mine.get(task) != facts["challenge"] for task, facts in self.tasks.items()):
+            raise SystemExit(f"--track {path}: it must hold the same tests, in the same versions, as the base suite.")
+        if not budget or not smallest or float(budget) <= float(smallest):
+            raise SystemExit(f"--track {path}: its budget per attempt must be larger than the base suite's.")
+        if cap + 1e-9 < 2 * float(budget):  # each model has half the cap: less would cut an attempt off early
+            raise SystemExit(
+                f"--track {path}: the cap of a race must be at least twice its budget per attempt "
+                f"(${2 * float(budget):.2f}), or the cap would stop an attempt the budget allows."
+            )
+        self.tracks[name] = {"path": path, "base": base, "attempt_usd": float(budget), "cap_usd": cap}
+
+    def track_of(self, model: str) -> str:
+        """The conditions one model is raced under: where it is placed if this runner has them, else the base."""
+        placed = self.placement.get(model)
+        return placed if placed in self.tracks else self.base_track
+
+    def track_for(self, a: str, b: str) -> str:
+        """The conditions a pair needs: the larger budget of its two models."""
+        return max((self.track_of(a), self.track_of(b)), key=self.track_order.index)
+
+    def track_asked(self, ask: dict, a: str, b: str, runs: int) -> str:
+        """The conditions a request is played under: the ones it names, if they are large enough for both models;
+        unnamed, the ones the pair needs. A batch is played under the base suite, as before."""
+        if runs > 1:
+            if ask.get("track") not in (None, self.base_track):
+                raise Refused(400, f"A batch is played under this runner's base conditions ({self.base_track}).")
+            return self.base_track
+        need = self.track_for(a, b)
+        track = ask.get("track") or need
+        if track not in self.tracks:
+            raise Refused(400, f"Unknown conditions. This runner has: {', '.join(self.track_order)}.")
+        if self.track_order.index(track) < self.track_order.index(need):
+            big = a if self.track_of(a) == need else b
+            raise Refused(
+                400,
+                f"{big} is raced under the {need} budget (${self.tracks[need]['attempt_usd']:.2f} an attempt): "
+                f"under {track} it would be cut off before it could finish.",
+            )
+        return track
 
     # ---- a race its visitor pays for, with their own key ----------------------------------------------------
     def own_models(self) -> list[str]:
@@ -764,6 +840,7 @@ class Races:
             "runs": 1,
             "early_stop": False,
             "keys": keys,
+            "track": self.track_asked(ask, a, b, 1),
         }
 
     def admit_own(self, client: str | None, now: float | None = None) -> None:
@@ -821,6 +898,17 @@ class Races:
             # named for this server, but without a price this minute (its provider's price list cannot be read)
             "models_unpriced": sorted(self.unpriced),
             "budgets": self.budgets(),
+            # the conditions a race can be played under (smallest budget per attempt first), each with the cap
+            # of one race, and which of them each model is raced under: a pair is raced under the larger
+            "tracks": [
+                {
+                    "id": name,
+                    "attempt_usd": self.tracks[name]["attempt_usd"],
+                    "cap_usd_per_race": self.tracks[name]["cap_usd"],
+                }
+                for name in self.track_order
+            ],
+            "placed": {m: self.track_of(m) for m in dict.fromkeys([*self.models, *self.own_models()])},
             # the limit on everything together, where the runner has one, and what is left of it
             "total": (
                 None
@@ -933,8 +1021,9 @@ class Races:
             raise Refused(400, f"A batch must be one of these sizes: {offered}.")
         if a == b and runs == 1:  # one model against itself is a steadiness check, and one run cannot show that
             raise Refused(400, "Choose two different models.")
+        track = self.track_asked(ask, a, b, runs)
         for model in (a, b):
-            if not self.affordable(model, runs):
+            if not self.affordable(model, runs, track):
                 name = providers.parse(model)[0]
                 raise Refused(
                     402, f"The live budget for {name} models is used up. Choose models from another provider."
@@ -955,24 +1044,27 @@ class Races:
             "who": who,
             "runs": runs,
             "early_stop": early and runs > 1,
+            "track": track,
         }
 
     def suite_for(self, ask: dict) -> dict:
         """The one-scenario suite a race plays: the base suite's settings and locked challenge, configured."""
         how_many = "One live scenario" if ask.get("runs", 1) == 1 else f"{ask['runs']} live scenarios"
+        track = self.tracks[ask.get("track") or self.base_track]  # the conditions this race is played under
+        base = track["base"]
         data = {
             "suite": "live-race" if ask.get("runs", 1) == 1 else "live-batch",
             "version": 1,
             "description": f"{how_many} of {ask['task']} ({ask['difficulty']}, {ask['profile']} profile).",
-            "defaults": {**(self.base.get("defaults") or {}), "difficulty": ask["difficulty"]},
-            "success": {**(self.base.get("success") or {}), "profile": ask["profile"]},
+            "defaults": {**(base.get("defaults") or {}), "difficulty": ask["difficulty"]},
+            "success": {**(base.get("success") or {}), "profile": ask["profile"]},
             "nodes": [{"id": ask["task"], "challenge": self.tasks[ask["task"]]["challenge"]}],
         }
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "live-race.yaml"
             path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
             loaded = suites.load(str(path))
-        loaded["path"] = f"live-race (from {self.base_path})"
+        loaded["path"] = f"live-race (from {track['path']})"
         return loaded
 
     def run(self, ask: dict, on_event, client: str | None = None) -> tuple[dict, dict]:
@@ -983,7 +1075,7 @@ class Races:
         none: its keys are checked for nothing, used for this one match and dropped."""
         ask = self.check(ask)
         runs = ask["runs"]
-        cap = self.cap_for(runs)
+        cap = self.cap_for(runs, ask["track"])
         keys = ask.get("keys")  # None unless the visitor pays
         if not self.busy.acquire(blocking=False):
             raise Refused(409, "The runner is busy with another race or a test being checked. Try again in a minute.")
