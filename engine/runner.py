@@ -58,8 +58,10 @@ def _git_commit(root: Path | None = None) -> str | None:
 
 
 def engine_commit() -> str | None:
-    """The engine's commit: its own checkout first, else the CI commit (a build with no .git directory)."""
-    return _git_commit() or os.environ.get("GITHUB_SHA") or None
+    """The engine's commit: its own checkout first; else the commit its container image was built from
+    (GLADIATOR_ENGINE_COMMIT, set in the image by the build: an image has no .git directory, and a hosted runner
+    is one); else the CI job's commit."""
+    return _git_commit() or os.environ.get("GLADIATOR_ENGINE_COMMIT") or os.environ.get("GITHUB_SHA") or None
 
 
 NODE_TIME_LIMIT_S = 600  # default per-attempt wall limit (v1's); suites can set attempt_time_limit_s

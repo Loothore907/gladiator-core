@@ -18,7 +18,7 @@ runner applies the same rule to the races it hands out (`docs/DEPLOYMENT.md`).
 | Field | What |
 |---|---|
 | `record_version` | Schema version (2). Absent = 1. |
-| `engine_commit` | Git commit of the engine checkout that ran the match (the CI commit only when the engine has no checkout of its own). |
+| `engine_commit` | Git commit of the engine that ran the match: its own checkout; in a container image, the commit the image was built from (set by the build, so a hosted runner's records name it); else the CI job's commit. `null` only for an image built without one (every hosted race before 2026-11-27). |
 | `run_id`, `started_unix`, `wall_s` | Identity and timing. |
 | `suite` | Name, version, path, sha256, node order, success rule, and each challenge's provenance (id, version, `content_sha256`, trust status at run time, tags, test type, licence). |
 | `settings` | Suite defaults, overrides, per-contestant settings (and whether they were equal), repeats, the instance salt (both sides get identical worlds), per-node settings. |

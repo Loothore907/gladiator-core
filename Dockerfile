@@ -22,6 +22,11 @@ RUN uv sync --frozen --no-dev \
     && useradd --create-home gladiator && mkdir -p runs && chown gladiator runs
 
 ENV PATH="/app/.venv/bin:$PATH"
+# The commit this image was built from, so every record it writes names the exact engine (an image has no .git
+# directory to ask). CI sets it; a local build without it leaves records saying the commit is not known.
+#   docker build --build-arg ENGINE_COMMIT=$(git rev-parse HEAD) -t gladiator .
+ARG ENGINE_COMMIT=""
+ENV GLADIATOR_ENGINE_COMMIT=${ENGINE_COMMIT}
 # Never runs the engine as root: the entrypoint only makes a mounted folder writable, then drops to `gladiator`.
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["--help"]
