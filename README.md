@@ -38,6 +38,35 @@ The run goes to completion with no prompts. Results land in `runs/<run_id>/`:
 uv run gladiator match --suite suites/ten_case.yaml --a scripted:golden --b scripted:invalid --max-usd 1
 ```
 
+## A live race, with your own key
+
+`gladiator serve` is the race runner: it plays one fresh scenario between two models and streams every step to a
+page as it happens. It reads your key from `.env` (or from the environment) and nothing else needs setting.
+
+```bash
+cp .env.example .env         # put ONE key in it; any of the four will do
+uv run gladiator serve       # http://127.0.0.1:8787, this machine only
+```
+
+| The key in `.env` | Models it can race |
+|---|---|
+| `OPENROUTER_API_KEY` | `deepseek/deepseek-v4.1-flash-1017`, `minimax/minimax-m3.1-flash`, `qwen/qwen3.8-27b`, `z-ai/glm-5.3` |
+| `ANTHROPIC_API_KEY` | `claude-haiku-5-5`, `claude-sonnet-5-5` |
+| `OPENAI_API_KEY` | `gpt-6-luna`, `gpt-6.1-terra` |
+| `GEMINI_API_KEY` | `gemini-3.1-flash-lite`, `gemini-3.5-flash-lite` |
+
+With more than one key every model above whose key is there is offered, across providers. What it can cost is
+fixed before it starts: at most $0.25 for a race and $5.00 in all, after which the runner starts nothing more
+(`--max-usd`, `--total-usd`). On the project's own matches a race between two of the small models cost about a
+cent, and one with Sonnet 5.5 in it about six. The key stays on your machine and is sent to its own provider
+and to nobody else.
+
+The runner listens on this machine only. A page served from this machine may call it (the
+[Gladiator Ledger](https://github.com/Loothore907/gladiator-ledger) page does, to race two models and add the
+result to its record: its README has the two commands); a request sent by a page from anywhere else starts
+nothing. `--model provider:model` (repeatable) replaces the list with models of your choosing, each of which
+needs a price. Hosting one for other people is a different matter: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Choosing models
 
 Contestants are written `provider:model`. Providers: `anthropic`, `openai`, `google`, `openrouter`.

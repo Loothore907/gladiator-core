@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
+import providers
 from engine import record, serve
 
 SIX = str(Path(__file__).resolve().parent.parent / "suites" / "six_case_mvp.yaml")
@@ -383,6 +384,93 @@ class RulesTests(unittest.TestCase):
         with TemporaryDirectory() as tmp, self.assertRaises(SystemExit):
             serve.serve(make(tmp), "0.0.0.0", 0)
 
+    def test_a_page_on_this_machine_may_call_a_runner_with_no_invites_and_no_other_page_may(self):
+        with TemporaryDirectory() as tmp:
+            own = make(tmp)  # no invites: its owner's, with the owner's own keys
+            for page in ("http://localhost:8000", "http://127.0.0.1:8790", "http://[::1]:3000", "http://localhost"):
+                self.assertTrue(own.allows(page), page)
+            self.assertTrue(own.allows("https://page.example"))  # named at the start
+            for page in (
+                "https://evil.example",
+                "http://localhost.evil.example",
+                "http://evil.example:8787",
+                "http://127.0.0.1.evil.example:8000",
+                "http://localhost:8000/",
+                "https://localhost:8000@evil.example",
+                "null",
+            ):
+                self.assertFalse(own.allows(page), page)
+            # a hosted runner, which has invites, allows only the pages it was started with
+            hosted = make(Path(tmp) / "hosted", codes={"judge-1"})
+            self.assertTrue(hosted.allows("https://page.example"))
+            self.assertFalse(hosted.allows("http://localhost:8000"))
+
+
+class OwnKeyTests(unittest.TestCase):
+    """A runner on a person's own machine, with their own key: `gladiator serve` and nothing else."""
+
+    def test_one_key_of_any_provider_is_enough_to_race_a_pair(self):
+        import gladiator
+        from engine.budget import load_prices
+
+        prices = load_prices()
+        for provider, names in gladiator.PROVIDER_KEYS.items():
+            mine = [m for m in gladiator.DEFAULT_RACE_MODELS if providers.parse(m)[0] == provider]
+            self.assertGreaterEqual(len(mine), 2, f"a {names[0]} alone would leave nothing to race")
+            if provider != "openrouter":  # its prices are read from its published list when a runner starts
+                for model in mine:
+                    self.assertIn(providers.parse(model)[1], prices[provider], f"{model} has no price")
+
+    def test_with_one_key_it_starts_and_offers_that_providers_models_and_with_none_it_says_where_a_key_goes(self):
+        import os
+        import subprocess
+        import sys
+
+        import gladiator
+
+        root = Path(__file__).resolve().parent.parent
+        keys = [name for names in gladiator.PROVIDER_KEYS.values() for name in names]
+        bare = {k: v for k, v in os.environ.items() if k not in keys and k != "GLADIATOR_RACE_CODES"}
+        with TemporaryDirectory() as tmp:
+            # A developer's own .env must not decide this test: every key is set here, to nothing unless the
+            # test gives it a value, and a value already set is never replaced by the one in .env.
+            def start(env):
+                blank = dict.fromkeys(keys, "")
+                return subprocess.Popen(
+                    [sys.executable, str(root / "gladiator.py"), "serve", "--port", "0", "--state", tmp],
+                    env={**bare, **blank, **env, "PYTHONUNBUFFERED": "1"},
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+
+            none = start({})
+            said, _ = none.communicate(timeout=60)
+            self.assertNotEqual(none.returncode, 0)
+            self.assertIn(".env", said)
+            for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
+                self.assertIn(name, said)
+
+            for key, provider in (("ANTHROPIC_API_KEY", "anthropic"), ("OPENAI_API_KEY", "openai")):
+                one = start({key: "not-a-real-key"})
+                try:
+                    lines = []
+                    for line in one.stdout:  # the start-up message ends with the build page's line
+                        lines.append(line)
+                        if "build page" in line:
+                            break
+                    text = "".join(lines)
+                    offered = [x for x in lines if x.strip().startswith("models:")]
+                    self.assertTrue(offered, f"with only {key} set the runner did not start:\n{text}")
+                    models = [m.strip() for m in offered[0].split(":", 1)[1].split(",")]
+                    self.assertEqual(len(models), 2, text)
+                    self.assertTrue(all(m.startswith(f"{provider}:") for m in models), text)
+                    self.assertIn("this machine only", text)
+                    self.assertNotIn("not-a-real-key", text)
+                finally:
+                    one.terminate()
+                    one.wait(timeout=30)
+
 
 class AnswerKeyTests(unittest.TestCase):
     """A finished race's answer key (owner, 2026-11-27): handed out for generated worlds only, and only as sealed."""
@@ -467,6 +555,9 @@ class HttpTests(unittest.TestCase):
         options = json.load(urllib.request.urlopen(f"{self.url}/options"))
         self.assertEqual(options["models"], MODELS)
         self.assertTrue(options["needs_code"] and options["tasks"])
+        # what a race can cost and what the runner may still spend in all: a page shows both before a race
+        self.assertEqual(options["cap_usd_per_race"], 0.2)
+        self.assertEqual(options["total"], {"limit_usd": 1.0, "left_usd": 1.0})
         health = json.load(urllib.request.urlopen(f"{self.url}/health"))
         self.assertEqual(health["busy"], False)
         self.assertIn("engine_commit", health)  # which build is answering
@@ -686,6 +777,44 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(refused.exception.code, 402)
         self.assertIn("invitation's budget", json.load(refused.exception)["error"])
         self.assertFalse(self.races.busy.locked())
+
+    def test_a_page_from_elsewhere_cannot_start_a_race_on_a_runner_with_no_invites(self):
+        """A runner on its owner's machine holds the owner's keys and asks for no sign-in. A browser sends a plain
+        POST from any page without asking first, so the runner must refuse one that names a page it does not allow."""
+        tmp = TemporaryDirectory()
+        races = make(tmp.name)  # no invites
+        server = serve.serve(races, "127.0.0.1", 0)
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        task = next(iter(races.tasks))
+        ask = json.dumps({"task": task, "a": MODELS[0], "b": MODELS[1]}).encode()
+
+        def post(headers):
+            return urllib.request.urlopen(urllib.request.Request(f"{url}/race", ask, headers), timeout=60)
+
+        try:
+            with mock.patch("builtins.print"):
+                # what a foreign page can send without the browser asking the runner first: no JSON content type
+                for page in ("https://evil.example", "http://evil.example:8787", "null"):
+                    with self.assertRaises(urllib.error.HTTPError) as refused:
+                        post({"Content-Type": "text/plain", "Origin": page})
+                    self.assertEqual(refused.exception.code, 403, page)
+                    self.assertNotIn("Access-Control-Allow-Origin", refused.exception.headers)
+                self.assertEqual(races.ledger.state["spent_usd"], 0.0)
+                self.assertEqual(races.results, [])  # nothing was run
+                self.assertFalse(list((Path(tmp.name) / "runs").glob("*/record.json")))
+                # a page served from this machine, and a program (which names no page), are served
+                for headers in ({"Content-Type": "application/json", "Origin": "http://localhost:8000"}, {}):
+                    reply = post(headers)
+                    self.assertEqual(reply.status, 200)
+                    self.assertIn("event: record", reply.read().decode())
+                    if "Origin" in headers:
+                        self.assertEqual(reply.headers["Access-Control-Allow-Origin"], "http://localhost:8000")
+                self.assertEqual(len(races.results), 2)
+        finally:
+            server.shutdown()
+            server.server_close()
+            tmp.cleanup()
 
     def test_one_race_at_a_time(self):
         task = next(iter(self.races.tasks))

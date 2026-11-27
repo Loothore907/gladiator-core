@@ -50,7 +50,8 @@ Money is guarded three times: every race has a hard cap (`--max-usd` semantics o
 start if that cap still fits in what is left of the server's limits (a total, a budget per provider, or both),
 and only one race runs at a time. Every reservation is written to the ledger file while it is open, so one that
 is still open at start-up (the process stopped under a race) is counted in full: a stop never hands money back
-to a limit. With no invites set the server only listens on this machine.
+to a limit. With no invites set the server only listens on this machine: a page served from this machine may
+call it, and a request sent by a page from anywhere else starts nothing.
 """
 
 import base64
@@ -266,6 +267,8 @@ def is_batch(sealed: dict) -> bool:
 
 
 RUN_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{6}")  # the only shape a run id has: nothing else reaches the disk
+# A page served from this machine: http://localhost:8000, http://127.0.0.1:8790 and the like.
+LOCAL_PAGE = re.compile(r"http://(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?")
 LIVE_LEVELS = ("easy", "standard")  # harder levels take too long and cost too much to watch live
 HEARTBEAT_S = 10  # hosts cut a stream that stays silent; a comment line keeps it open
 MAX_BODY = 8192  # a description of 1,200 characters, in any alphabet, with the rest of the request
@@ -684,6 +687,15 @@ class Races:
         left = self.ledger.left_for(providers.parse(model)[0])
         return left is None or left + 1e-9 >= self.cap_for(runs)
 
+    def allows(self, origin: str) -> bool:
+        """Whether a browser page at this address may call the runner: one named at the start (--origin), or,
+        on a runner with no invites, any page served from this machine itself. Such a runner listens on this
+        machine only and is its owner's, so a page they serve beside it needs no naming; a page from anywhere
+        else is never allowed unless it is named."""
+        if origin in self.origins or "*" in self.origins:
+            return True
+        return self.codes is None and bool(LOCAL_PAGE.fullmatch(origin))
+
     def options(self) -> dict:
         return {
             "tasks": [
@@ -695,6 +707,12 @@ class Races:
             # named for this server, but without a price this minute (its provider's price list cannot be read)
             "models_unpriced": sorted(self.unpriced),
             "budgets": self.budgets(),
+            # the limit on everything together, where the runner has one, and what is left of it
+            "total": (
+                None
+                if self.ledger.total_usd is None
+                else {"limit_usd": self.ledger.total_usd, "left_usd": max(0.0, self.ledger.left())}
+            ),
             "profiles": sorted(PROFILES),
             "cap_usd_per_race": self.max_usd,
             # batches on offer: how many runs, and the cap of each size
@@ -1209,7 +1227,7 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
 
         def _cors(self):
             origin = self.headers.get("Origin")
-            if origin and (origin in races.origins or "*" in races.origins):
+            if origin and races.allows(origin):
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -1292,6 +1310,13 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
             if path not in ("/race", "/signin") and not (forks and path in FORK_POSTS):
                 self.close_connection = True  # its body is not read: it must not be taken for the next request
                 return self._json(404, {"error": "Not found."})
+            # With no invites nothing but the address stands between a caller and this machine's keys, and a
+            # browser will send a plain POST from any page at all without asking first. So a request that names
+            # the page it came from is served only for a page this runner allows. A program names none.
+            origin = self.headers.get("Origin")
+            if races.codes is None and origin and not races.allows(origin):
+                self.close_connection = True  # its body is not read: it must not be taken for the next request
+                return self._json(403, {"error": "This page may not start anything on this runner."})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 if not 0 < length <= MAX_BODY:
