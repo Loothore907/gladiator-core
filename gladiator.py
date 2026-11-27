@@ -116,15 +116,14 @@ def cmd_serve(args):
     import providers
     from engine import serve
 
-    # GLADIATOR_RACE_CODES: invites, comma-separated; "invite:40" gives that invite its own number of races.
-    codes, limits = set(), {}
-    for entry in os.environ.get("GLADIATOR_RACE_CODES", "").split(","):
-        code, _, limit = entry.strip().partition(":")
-        if code:
-            codes.add(code)
-            if limit:
-                limits[serve.who_of(code)] = int(limit)
-    codes = codes or None
+    # GLADIATOR_RACE_CODES: invites, comma-separated, each with the terms it carries after colons: a number of
+    # races ("invite:40"), or a budget of its own and the days it works on
+    # ("invite:usd=40:from=2026-12-10:until=2026-12-17"). serve.read_invites has the whole form.
+    invites = serve.read_invites(os.environ.get("GLADIATOR_RACE_CODES", ""))
+    codes = set(invites) or None
+    limits = {serve.who_of(c): t["races"] for c, t in invites.items() if t["races"] is not None}
+    code_usd = {serve.who_of(c): t["usd"] for c, t in invites.items() if t["usd"] is not None}
+    windows = {serve.who_of(c): (t["from"], t["until"]) for c, t in invites.items() if t["from"] or t["until"]}
     budgets = {}
     for entry in args.provider_usd or []:
         name, _, amount = entry.partition("=")
@@ -144,7 +143,7 @@ def cmd_serve(args):
     if len(models) < 2:
         sys.exit("Fewer than two models have both a key and a budget on this machine: nothing to race.")
     state = Path(args.state)
-    ledger = serve.Ledger(state / "race_ledger.json", total, args.runs_per_code, budgets, limits)
+    ledger = serve.Ledger(state / "race_ledger.json", total, args.runs_per_code, budgets, limits, code_usd)
     races = serve.Races(
         args.suite,
         models,
@@ -158,6 +157,7 @@ def cmd_serve(args):
         batch_parallel=args.batch_parallel,
         batch_pass_rate=args.batch_pass_rate,
         after_race=args.after_race_workflow,
+        windows=windows,
     )
     reader = args.reader
     if reader:  # the model that reads a signed-in visitor's description on the build page
@@ -167,7 +167,9 @@ def cmd_serve(args):
                 f"  no key for {reader} on this machine: descriptions will be matched by their words only", flush=True
             )
             reader = None
-    forks = serve.Forks(races, reader, args.read_usd, open_create=args.open_create)
+    forks = serve.Forks(
+        races, reader, args.read_usd, creates_per_code=args.creates_per_code, open_create=args.open_create
+    )
     spaces, keys = None, {}
     if args.assistants:  # the same test builder for assistants and programs: /mcp and /api, a private space per key
         from engine import hosted
@@ -185,6 +187,28 @@ def cmd_serve(args):
         f"\n  budget {b['provider']}: ${b['left_usd']:.2f} left of ${b['limit_usd']:.2f}" for b in races.budgets()
     )
     out = f"\n  not offered (no key or no budget here): {', '.join(left_out)}" if left_out else ""
+    # Each invite's terms, named by five characters of a hash and never by a character of the invite, so the
+    # person who set them can read back what this server understood.
+    now = time.time()
+    for code, terms in sorted(invites.items(), key=lambda item: serve.fingerprint(item[0])):
+        who_is = serve.who_of(code)
+        said = []
+        if terms["usd"] is not None:
+            said.append(f"its own budget of ${terms['usd']:.2f} (${max(0.0, ledger.left_for_code(who_is)):.2f} left)")
+        if ledger.races_left(who_is) is not None:
+            said.append(f"{ledger.races_left(who_is)} race(s) left of {limits.get(who_is, args.runs_per_code)}")
+        if terms["from"] is not None:
+            said.append(f"from {serve.day_of(terms['from'])}")
+        if terms["until"] is not None:
+            said.append(f"through {serve.day_of(terms['until'], last=True)}")
+        if terms["from"] is not None and now < terms["from"]:
+            said.append("NOT OPEN YET")
+        elif terms["until"] is not None and now >= terms["until"]:
+            said.append("ENDED")
+        elif terms["from"] is not None or terms["until"] is not None:
+            said.append("open now")
+        dated = terms["from"] is not None or terms["until"] is not None
+        out += f"\n  invite {serve.fingerprint(code)}: {', '.join(said)}" + (" (whole days, UTC)" if dated else "")
     if races.unpriced:  # asked for again while the server runs
         out += "".join(f"\n  not offered until it has a price: {m} ({why})" for m, why in races.unpriced.items())
     holds, counted = ledger.recovered
@@ -669,7 +693,19 @@ def main(argv=None):
         help="a budget for one provider's models, e.g. openrouter=30 (repeatable); a model is offered while its "
         "provider can cover one more race",
     )
-    sv.add_argument("--runs-per-code", type=int, default=10, help="live races one invite may start")
+    sv.add_argument(
+        "--runs-per-code",
+        type=int,
+        default=10,
+        help="live races one invite may start, unless the invite carries its own number or its own budget "
+        "(GLADIATOR_RACE_CODES: invite:40, or invite:usd=40:from=2026-12-10:until=2026-12-17)",
+    )
+    sv.add_argument(
+        "--creates-per-code",
+        type=int,
+        default=10,
+        help="tests one sign-in may create on the build page (creating costs no money, only this machine's time)",
+    )
     sv.add_argument(
         "--batch-sizes",
         default="",

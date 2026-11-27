@@ -12,7 +12,9 @@
                   re-grade a finished race (owner, 2026-11-27). Only for a record whose every test generates a
                   fresh world for each attempt (the answers are spent the moment the race ends; a fixed
                   test's answers never leave), and only when it matches the fingerprint in the sealed record
-  POST /signin    {"invite"} (or {"token"} to renew): a session token and the races it has left. An invite is
+  POST /signin    {"invite"} (or {"token"} to renew): a session token and what it has left: `races_left`, and
+                  for an invite with a budget of its own `budget_usd` and `left_usd` (`races_left` is then how
+                  many single races that still covers) and, if it ends on a day, `until_unix`. An invite is
                   typed or followed once; after that the session is all a browser needs
   POST /race      {"task", "a", "b", "difficulty", "profile", "token"}: plays one fresh scenario of that task between
                   the two models and streams what happens (text/event-stream: the runner's events, one per message),
@@ -52,6 +54,7 @@ to a limit. With no invites set the server only listens on this machine.
 """
 
 import base64
+import datetime
 import hashlib
 import hmac
 import json
@@ -88,6 +91,65 @@ MAX_DESCRIPTION = 1200
 def who_of(code: str) -> str:
     """The id a sign-in is recorded under: never the code itself (the ledger is a file on a disk)."""
     return hashlib.sha256(("gladiator-invite\n" + code).encode()).hexdigest()[:16]
+
+
+def fingerprint(code: str) -> str:
+    """Five characters that tell two invites apart in a log and say nothing about either."""
+    return hashlib.sha256(code.encode()).hexdigest()[:5]
+
+
+def read_invites(raw: str) -> dict[str, dict]:
+    """The invites of GLADIATOR_RACE_CODES, comma-separated, each with the terms it carries after colons:
+
+      invite                                  the server's own number of races (--runs-per-code)
+      invite:40                               its own number of races
+      invite:usd=40                           its own budget in dollars instead of a number of races: everything
+                                              started with it (races, batches, readings) may spend that much
+      invite:usd=40:from=2026-12-10:until=2026-12-17
+                                              and it works only from the first of those days through the last
+                                              (whole days, UTC)
+
+    Returns {invite: {"races", "usd", "from", "until"}}: None where a term is not set; `from` and `until` as
+    seconds, `until` being the first moment after its day. A mistake stops the start and names the entry by its
+    place, never by a character of the invite."""
+    out: dict[str, dict] = {}
+    for place, entry in enumerate((e.strip() for e in raw.split(",")), 1):
+        if not entry:
+            continue
+        code, *parts = entry.split(":")
+        if not code:
+            raise SystemExit(f"GLADIATOR_RACE_CODES: entry {place} has terms and no invite before them.")
+        terms: dict = {"races": None, "usd": None, "from": None, "until": None}
+        for part in parts:
+            name, _, value = part.partition("=")
+            try:
+                if part.isdigit():
+                    terms["races"] = int(part)
+                elif name == "usd":
+                    terms["usd"] = float(value)
+                    if not 0 < terms["usd"] < 100000:
+                        raise ValueError
+                elif name in ("from", "until"):
+                    day = datetime.date.fromisoformat(value) + datetime.timedelta(days=name == "until")
+                    terms[name] = int(datetime.datetime(day.year, day.month, day.day, tzinfo=datetime.UTC).timestamp())
+                else:
+                    raise ValueError
+            except ValueError:
+                shown = name if name in ("usd", "from", "until") else "a term"
+                raise SystemExit(
+                    f"GLADIATOR_RACE_CODES: entry {place} carries {shown} this runner cannot read. After an invite "
+                    "come a number of races, usd=AMOUNT, from=YYYY-MM-DD and until=YYYY-MM-DD, each after a colon."
+                ) from None
+        if terms["from"] is not None and terms["until"] is not None and terms["from"] >= terms["until"]:
+            raise SystemExit(f"GLADIATOR_RACE_CODES: entry {place} ends before it starts.")
+        out[code] = terms
+    return out
+
+
+def day_of(moment: int, last: bool = False) -> str:
+    """A term's day as a person reads it ("10 December 2026"); `last`: the day an `until` ends with."""
+    day = datetime.datetime.fromtimestamp(moment - (1 if last else 0), datetime.UTC)
+    return f"{day.day} {day:%B %Y}"
 
 
 def summary(sealed: dict) -> dict:
@@ -223,7 +285,9 @@ class Ledger:
     `by_provider` gives each provider its own budget ({"openrouter": 30.0, ...}); a race reserves its whole cap
     against the provider of each of its two models, so neither budget can be pushed over. `total_usd` is the limit
     on everything together (None: the provider budgets are the only limits). `limits` gives one sign-in its own
-    number of races; the others get `runs_per_code`. Sign-ins are recorded by an id, never by the code itself.
+    number of races; the others get `runs_per_code`. `code_usd` gives one sign-in a budget of its own in dollars
+    instead: everything started with it is held against that budget like against a provider's, and no number of
+    races applies unless it has one too. Sign-ins are recorded by an id, never by the code itself.
     """
 
     def __init__(
@@ -233,9 +297,11 @@ class Ledger:
         runs_per_code: int,
         by_provider: dict[str, float] | None = None,
         limits: dict[str, int] | None = None,
+        code_usd: dict[str, float] | None = None,
     ):
         self.path, self.total_usd, self.runs_per_code = Path(path), total_usd, runs_per_code
         self.by_provider, self.limits = dict(by_provider or {}), dict(limits or {})
+        self.code_usd = dict(code_usd or {})
         if total_usd is None and not self.by_provider:
             raise SystemExit("The runner needs a spending limit: a total, a budget per provider, or both.")
         self.lock = threading.Lock()
@@ -273,12 +339,17 @@ class Ledger:
     def _provider(self, name: str) -> dict:
         return self.state["providers"].setdefault(name, {"spent_usd": 0.0, "held_usd": 0.0})
 
+    def _code(self, who: str) -> dict:
+        return self.state.setdefault("codes", {}).setdefault(who, {"spent_usd": 0.0, "held_usd": 0.0})
+
     # ---- holds: every reservation is written down while it is open, so a stop cannot make one vanish ---------
     def _open(self, kind: str, cap: float, who: str | None, providers) -> dict:
         entry = {"kind": kind, "cap": cap, "who": who, "providers": sorted(set(providers))}
         self.state["held_usd"] += cap
         for name in entry["providers"]:
             self._provider(name)["held_usd"] += cap
+        if who:
+            self._code(who)["held_usd"] += cap
         self.state.setdefault("open", []).append(entry)
         return entry
 
@@ -303,6 +374,10 @@ class Ledger:
             provider["held_usd"] = max(0.0, provider["held_usd"] - cap)
             share = spent / len(names) if spent_by is None else spent_by.get(name, 0.0)
             provider["spent_usd"] = round(provider["spent_usd"] + share, 6)
+        if entry.get("who"):  # what each sign-in has spent, whether or not it has a budget of its own
+            code = self._code(entry["who"])
+            code["held_usd"] = max(0.0, code["held_usd"] - cap)
+            code["spent_usd"] = round(code["spent_usd"] + spent, 6)
         if entry["kind"] == "race":
             self.state["races"] += 1
         else:
@@ -323,10 +398,10 @@ class Ledger:
             self.state["spent_usd"] = round(self.state["spent_usd"] + unlisted, 6)
             counted += unlisted
         self.state["held_usd"] = 0.0
-        for provider in self.state["providers"].values():
-            if provider.get("held_usd", 0.0) > 1e-9:
-                provider["spent_usd"] = round(provider.get("spent_usd", 0.0) + provider["held_usd"], 6)
-            provider["held_usd"] = 0.0
+        for kept in (*self.state["providers"].values(), *(self.state.get("codes") or {}).values()):
+            if kept.get("held_usd", 0.0) > 1e-9:
+                kept["spent_usd"] = round(kept.get("spent_usd", 0.0) + kept["held_usd"], 6)
+            kept["held_usd"] = 0.0
         self.recovered = (len(holds) + (1 if unlisted > 1e-9 else 0), round(counted, 6))
 
     def left(self) -> float:
@@ -342,14 +417,35 @@ class Ledger:
         entry = self.state["providers"].get(provider) or {}
         return round(self.by_provider[provider] - entry.get("spent_usd", 0.0) - entry.get("held_usd", 0.0), 6)
 
-    def races_left(self, who: str) -> int:
+    def left_for_code(self, who: str) -> float | None:
+        """What is left of one sign-in's own budget; None when it has none (it has a number of races instead)."""
+        if who not in self.code_usd:
+            return None
+        used = (self.state.get("codes") or {}).get(who) or {}
+        return round(self.code_usd[who] - used.get("spent_usd", 0.0) - used.get("held_usd", 0.0), 6)
+
+    def races_left(self, who: str) -> int | None:
+        """How many more races this sign-in may start by its number of races; None when no number applies (it
+        has a budget of its own and no number beside it)."""
+        if who in self.code_usd and who not in self.limits:
+            return None
         return max(0, self.limits.get(who, self.runs_per_code) - self.state["by_code"].get(who, 0))
+
+    def _fits_code(self, cap: float, who: str | None):
+        left = self.left_for_code(who) if who else None
+        if left is not None and cap > left + 1e-9:
+            raise Refused(
+                402,
+                f"This invitation's budget cannot cover that: ${max(0.0, left):.2f} is left of "
+                f"${self.code_usd[who]:.2f}, and ${cap:.2f} must be set aside before it starts.",
+            )
 
     def hold(self, cap: float, who: str, providers: tuple[str, ...] = ()):
         """Reserve a race's whole cap before it starts: it can never push a limit over."""
         with self.lock:
-            if self.races_left(who) <= 0:
+            if self.races_left(who) == 0:
                 raise Refused(429, f"This sign-in has used its {self.limits.get(who, self.runs_per_code)} live races.")
+            self._fits_code(cap, who)
             if self.total_usd is not None and cap > self.left() + 1e-9:
                 raise Refused(402, "The live demo's spending limit has been reached. Recorded races still play.")
             for name in sorted(set(providers)):
@@ -383,16 +479,17 @@ class Ledger:
             used[who] = used.get(who, 0) + 1
             self._save()
 
-    def hold_small(self, cap: float, provider: str):
+    def hold_small(self, cap: float, provider: str, who: str | None = None):
         """Reserve the cap of something that is not a race (a model reading a description) against the same
-        limits: the total and that provider's budget."""
+        limits: the total, that provider's budget, and the budget of the sign-in it is for if it has one."""
         with self.lock:
+            self._fits_code(cap, who)
             if self.total_usd is not None and cap > self.left() + 1e-9:
                 raise Refused(402, "The live demo's spending limit has been reached.")
             left = self.left_for(provider)
             if left is not None and cap > left + 1e-9:
                 raise Refused(402, f"The live budget for {provider} models is used up.")
-            self._open("read", cap, None, (provider,))
+            self._open("read", cap, who, (provider,))
             self._save()
 
     def settle_small(self, cap: float, spent: float, provider: str):
@@ -418,7 +515,11 @@ class Races:
         batch_parallel: int = 5,
         batch_pass_rate: float = 0.8,
         after_race: str | None = None,
+        windows: dict[str, tuple[int | None, int | None]] | None = None,
     ):
+        # The days a sign-in works on: {sign-in id: (from, until)} in seconds, None where it has no such bound.
+        # Outside them neither the invite nor a session made from it gets in.
+        self.windows = dict(windows or {})
         # After a race is filed, a GitHub workflow can be started (owner/repo/workflow-file) so a results store
         # imports the new record at once instead of on its next timed run. Needs GLADIATOR_GITHUB_TOKEN.
         self.after_race = after_race
@@ -500,11 +601,28 @@ class Races:
     def _sign(self, payload: str) -> str:
         return hmac.new(self.session_key, payload.encode(), hashlib.sha256).hexdigest()
 
+    def allowance(self, who: str) -> dict:
+        """What a sign-in has left: `races_left`, and for one with a budget of its own that budget, what is left
+        of it and (as `races_left`) how many more single races that still covers; `until_unix` when it ends."""
+        out: dict = {"races_left": self.ledger.races_left(who)}
+        left = self.ledger.left_for_code(who)
+        if left is not None:
+            covers = int((max(0.0, left) + 1e-9) // self.max_usd)
+            out["races_left"] = covers if out["races_left"] is None else min(out["races_left"], covers)
+            out["budget_usd"], out["left_usd"] = self.ledger.code_usd[who], max(0.0, left)
+        until = self.windows.get(who, (None, None))[1]
+        if until is not None:
+            out["until_unix"] = until
+        return out
+
     def session_for(self, who: str, now: float | None = None) -> dict:
         expires = int((time.time() if now is None else now) + SESSION_DAYS * 86400)
+        until = self.windows.get(who, (None, None))[1]
+        if until is not None:
+            expires = min(expires, until)  # a session never outlives its invite
         payload = f"{who}.{expires}"
         token = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=") + "." + self._sign(payload)
-        return {"token": token, "expires_unix": expires, "races_left": self.ledger.races_left(who)}
+        return {"token": token, "expires_unix": expires, **self.allowance(who)}
 
     def who_holds(self, token: str, now: float | None = None) -> str | None:
         """The sign-in a session token belongs to, or None if it is forged, expired or its invite is gone."""
@@ -512,7 +630,7 @@ class Races:
             packed, signature = str(token).split(".")
             payload = base64.urlsafe_b64decode(packed + "=" * (-len(packed) % 4)).decode()
             who, expires = payload.split(".")
-            if not hmac.compare_digest(signature, self._sign(payload)):
+            if not hmac.compare_digest(signature.encode(), self._sign(payload).encode()):
                 return None
             if int(expires) < (time.time() if now is None else now):
                 return None
@@ -520,16 +638,28 @@ class Races:
             return None
         return who if who in {who_of(c) for c in self.codes or []} else None
 
-    def identify(self, ask: dict) -> str:
-        """Who is asking: a session token, or an invite sent directly. Raises Refused(403) for anyone else."""
+    def _within_its_days(self, who: str, now: float | None = None) -> str:
+        """An invite with days of its own works on those days only. Saying so plainly gives nothing away: only
+        someone who holds the invite, or a session made from it, is ever told."""
+        start, until = self.windows.get(who, (None, None))
+        now = time.time() if now is None else now
+        if start is not None and now < start:
+            raise Refused(403, f"This invitation opens on {day_of(start)} (UTC). It is the right one: come back then.")
+        if until is not None and now >= until:
+            raise Refused(403, f"This invitation ended with {day_of(until, last=True)} (UTC).")
+        return who
+
+    def identify(self, ask: dict, now: float | None = None) -> str:
+        """Who is asking: a session token, or an invite sent directly. Raises Refused(403) for anyone else, and
+        for an invite outside the days it works on."""
         if self.codes is None:
             return "local"
-        who = self.who_holds(ask.get("token") or "")
+        who = self.who_holds(ask.get("token") or "", now)
         if who:
-            return who
-        code = str(ask.get("code") or ask.get("invite") or "")
-        if code and any(hmac.compare_digest(code, known) for known in self.codes):
-            return who_of(code)
+            return self._within_its_days(who, now)
+        code = str(ask.get("code") or ask.get("invite") or "").encode()  # bytes: any alphabet compares safely
+        if code and any(hmac.compare_digest(code, known.encode()) for known in self.codes):
+            return self._within_its_days(who_of(code.decode()), now)
         raise Refused(403, "You are not signed in for live races, or the sign-in has expired.")
 
     def sign_in(self, ask: dict) -> dict:
@@ -874,9 +1004,10 @@ class Forks:
         if self.reader and who:
             provider = providers.parse(self.reader)[0]
             try:  # no budget, no reads left or no reader: the description's words still match
-                self.ledger.hold_small(self.read_usd, provider)
+                self.ledger.hold_small(self.read_usd, provider, who)
                 try:
-                    self.ledger.use("reads", who, self.reads_per_code)
+                    if self.ledger.left_for_code(who) is None:  # with a budget of its own, money is the limit
+                        self.ledger.use("reads", who, self.reads_per_code)
                     reader = self.make_reader()
                 except Exception:
                     self.ledger.settle_small(self.read_usd, 0.0, provider)
