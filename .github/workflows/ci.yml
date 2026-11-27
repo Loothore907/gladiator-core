@@ -54,7 +54,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Build image
-        run: docker build -t gladiator:ci .
+        run: docker build --build-arg "ENGINE_COMMIT=$GITHUB_SHA" -t gladiator:ci .
+      - name: The image names the commit it was built from
+        run: |
+          said=$(docker run --rm --entrypoint python gladiator:ci -c "from engine.runner import engine_commit; print(engine_commit())")
+          test "$said" = "$GITHUB_SHA" || { echo "the image says its engine commit is '$said', not $GITHUB_SHA"; exit 1; }
       - name: Match inside the container
         run: |
           docker run --rm gladiator:ci match --suite suites/ten_case.yaml --a scripted:golden --b scripted:invalid --max-usd 1 | tee match.txt
@@ -91,7 +95,12 @@ jobs:
           docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:main" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --build-arg "ENGINE_COMMIT=$GITHUB_SHA" \
             --label "org.opencontainers.image.licenses=Apache-2.0" .
+      - name: The image about to be published names the commit it was built from
+        run: |
+          said=$(docker run --rm --entrypoint python "$IMAGE:$GITHUB_SHA" -c "from engine.runner import engine_commit; print(engine_commit())")
+          test "$said" = "$GITHUB_SHA" || { echo "the image says its engine commit is '$said', not $GITHUB_SHA"; exit 1; }
       - name: The image about to be published plays a match
         run: |
           docker run --rm "$IMAGE:$GITHUB_SHA" match --suite suites/ten_case.yaml --a scripted:golden --b scripted:invalid --max-usd 1 | tee match.txt

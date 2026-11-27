@@ -1814,6 +1814,11 @@ class RunRecordTests(unittest.TestCase):
                 self.assertEqual(runner.engine_commit(), own.stdout.strip())
             else:  # no checkout (e.g. a container image): the CI commit is the fallback
                 self.assertEqual(runner.engine_commit(), "f" * 40)
+                # a container image names its own commit (set by the build), which wins over the job's
+                with mock.patch.dict(os.environ, {"GLADIATOR_ENGINE_COMMIT": "e" * 40}):
+                    self.assertEqual(runner.engine_commit(), "e" * 40)
+                with mock.patch.dict(os.environ, {"GLADIATOR_ENGINE_COMMIT": ""}):
+                    self.assertEqual(runner.engine_commit(), "f" * 40)
             self.assertIsNone(runner._git_commit(root / "engine"))  # inside a checkout, but not its top
             with tempfile.TemporaryDirectory() as tmp:
                 self.assertIsNone(runner._git_commit(Path(tmp)))
