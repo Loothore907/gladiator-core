@@ -204,7 +204,7 @@ def cmd_serve(args):
             if name and key:
                 keys[name] = key
         spaces = hosted.Spaces(races, state, keys, public_url=args.public_url or "")
-    server = serve.serve(races, args.host, args.port, forks, spaces)
+    server = serve.serve(races, args.host, args.port, forks, spaces, page=args.page)
     who = f"{len(codes)} invite(s)" if codes else "no invites: this machine only, and pages served from it"
     limit = f"${total:.2f} in total" if total is not None else "the provider budgets"
     per = "".join(
@@ -811,6 +811,11 @@ def main(argv=None):
     )
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8787)
+    sv.add_argument(
+        "--page",
+        help="the web address of the page that races on this runner, e.g. https://ledger.example.org/: a person "
+        "who opens the runner's own address in a browser is pointed there (default: it says how to set a page up)",
+    )
     sv.add_argument(
         "--public-url",
         help="the address this runner is reached at, e.g. https://race.example.org: download links handed to "

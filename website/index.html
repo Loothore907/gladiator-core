@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gladiator: which of two AI models does this task better?</title>
+<meta name="description" content="Gladiator is an open-source engine for head-to-head evaluation of AI models: two models, the same scenarios, identical settings, and a sealed record of which did the task better.">
+<link rel="canonical" href="https://gladiatorbench.com/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://gladiatorbench.com/">
+<meta property="og:title" content="Gladiator: which of two AI models does this task better?">
+<meta property="og:description" content="Two models, the same scenarios, identical settings, and a sealed record of which did the task better.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d5c63'/%3E%3Crect x='7' y='8' width='7' height='16' rx='2' fill='%23ffffff'/%3E%3Crect x='18' y='8' width='7' height='16' rx='2' fill='%23f0c170'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <p class="brand">Gladiator</p>
+  <h1>Two models. The same task. A sealed record of which did it <em>better</em>.</h1>
+  <p class="lede">Gladiator is an open-source engine for head-to-head evaluation of AI models. Two models work
+    through the same scenarios of a tool-using workflow, under identical settings and a hard budget. The result
+    is a claim about that one task, with how sure it is. It is never a general ranking, and no winner is named
+    when the evidence is thin or level.</p>
+  <p class="actions">
+    <a class="button" href="https://ledger.gladiatorbench.com/">Open Gladiator Ledger</a>
+    <a class="button quiet" href="https://github.com/Loothore907/gladiator-core">The engine on GitHub</a>
+  </p>
+  <p class="note">Ledger is the record of every match, read in your browser. Nothing to install, and no API key.</p>
+
+  <ol class="flow" aria-label="A match, from one scenario to a result">
+    <li class="station">
+      <span class="what">One scenario</span>
+      <span class="how">the same copy for both models</span>
+    </li>
+    <li class="station pair">
+      <span class="sides"><span class="side a">Model A</span><span class="side b">Model B</span></span>
+      <span class="how">same tools, settings and budget</span>
+    </li>
+    <li class="station">
+      <span class="what">One sealed record</span>
+      <span class="how">every step, score and cost</span>
+    </li>
+    <li class="station">
+      <span class="what">A result</span>
+      <span class="how">one model, or a tie</span>
+    </li>
+  </ol>
+</header>
+
+<main>
+  <section aria-labelledby="h-how">
+    <h2 id="h-how">How a match works</h2>
+    <ol class="steps">
+      <li>
+        <h3><span class="num">1</span> One world, played twice</h3>
+        <p>Both models get the identical copy of each scenario: the same records, the same tools, the same
+          settings and the same budget. A test that generates a new scenario for every attempt leaves no fixed
+          answer to have seen before.</p>
+      </li>
+      <li>
+        <h3><span class="num">2</span> Every step on the record</h3>
+        <p>What each model was shown and what it did, every score, the cost and the exact API settings go into
+          one record, sealed with a SHA-256 fingerprint. A record edited afterwards fails its check.</p>
+      </li>
+      <li>
+        <h3><span class="num">3</span> Judged in a fixed order</h3>
+        <p>Finishing the task comes first. When both models finish it, the more efficient one wins: fewer
+          mistakes, lower cost, fewer tokens, less time. When neither does, the one that got further. No real
+          difference is a tie, and is called one.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="h-where">
+    <h2 id="h-where">Where to go</h2>
+    <div class="cards">
+      <article class="card">
+        <h3>Gladiator Ledger</h3>
+        <p>Of these two models, which does <em>this</em> task better, how sure is that, and what should I build?
+          Ledger keeps every match in a graph and answers from it, with the matches behind the answer.</p>
+        <p class="links">
+          <a href="https://ledger.gladiatorbench.com/">Open Ledger</a>
+          <a href="https://github.com/Loothore907/gladiator-ledger#race-two-models-live-with-your-own-api-key">Race two models live, with your own API key</a>
+        </p>
+      </article>
+      <article class="card">
+        <h3>The engine</h3>
+        <p>Open source under the Apache-2.0 licence. Run a match on your own machine with your own keys, or try
+          it for nothing with the offline practice models:</p>
+        <pre><code>uv run gladiator match --suite suites/ten_case.yaml --a scripted:golden --b scripted:invalid --max-usd 1</code></pre>
+        <p class="links">
+          <a href="https://github.com/Loothore907/gladiator-core">gladiator-core on GitHub</a>
+          <a href="https://github.com/Loothore907/gladiator-core/blob/main/docs/DEVELOPMENT.md">Set-up, step by step</a>
+        </p>
+      </article>
+      <article class="card">
+        <h3>The tests</h3>
+        <p>A test is a package of data, never code: scenarios or a recipe that generates them, simulated tools,
+          checks and answer keys. The aim is an open library of tests people trust, which anyone can use, fork
+          or build for a workflow of their own.</p>
+        <p class="links">
+          <a href="https://github.com/Loothore907/gladiator-core/tree/main/challenges">The test library</a>
+          <a href="https://github.com/Loothore907/gladiator-core/blob/main/docs/PRODUCT.md">Where the project is going</a>
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-trust">
+    <h2 id="h-trust">Why a result can be believed</h2>
+    <dl class="trust">
+      <div>
+        <dt>The same conditions for both</dt>
+        <dd>One world, one set of tools and settings, one budget and one judge. The settings are written into
+          the record.</dd>
+      </div>
+      <div>
+        <dt>A hard cap on spend</dt>
+        <dd>A model can be used only if it has a price, and a match stops at the dollar cap it was started
+          with.</dd>
+      </div>
+      <div>
+        <dt>Records that cannot be quietly edited</dt>
+        <dd>Each record carries its own fingerprint, and <code>gladiator verify</code> checks a record against
+          it.</dd>
+      </div>
+      <div>
+        <dt>Answer keys in the open</dt>
+        <dd>After a match on generated scenarios, Ledger publishes their answer key beside the record, so anyone
+          can grade it again.</dd>
+      </div>
+    </dl>
+  </section>
+</main>
+
+<footer class="foot">
+  <p>Gladiator is open source under the Apache-2.0 licence.</p>
+  <p class="links">
+    <a href="https://ledger.gladiatorbench.com/">Gladiator Ledger</a>
+    <a href="https://github.com/Loothore907/gladiator-core">The engine on GitHub</a>
+    <a href="https://github.com/Loothore907/gladiator-ledger">Ledger on GitHub</a>
+  </p>
+</footer>
+</body>
+</html>

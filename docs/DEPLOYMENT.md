@@ -42,6 +42,9 @@ uv run gladiator serve                                # this machine only, your 
   without being named. A request that names any other page as its sender starts nothing: a browser sends a
   plain request from any page without asking first, and nothing but the address would stand between that page
   and the keys.
+- Opened in a browser, the runner's own address says what it is and points to the page that races on it
+  (`--page https://your.page/`; with none named it says how a page is set up). Every other unknown address is
+  still "Not found.".
 - A race is built from safe choices only: a task from the base suite's locked challenges, two models from the
   server's list, a difficulty level and a scoring profile. Free text never reaches the engine.
 - Money is guarded three times: a hard cap per race, limits the server will not go past (a race starts only if
@@ -182,6 +185,15 @@ connects: `docs/ASSISTANT.md`.
 - **The log** prints the method, the path and the status of a request, and nothing else: never a body, a query
   or a key (a key carried in the address is printed as `/mcp/(key)`). A request is read in full before it is
   refused, so a refused body cannot be mistaken for the next request.
+
+## The home page
+
+`website/` is the project's home page, one static page with no script: what Gladiator is, and where Ledger, the
+engine and the tests are. It is published to GitHub Pages by the "Publish home page" workflow after CI is green on
+`main`, and answers at https://gladiatorbench.com (`www` is sent there). It is not part of the container image.
+`tests/test_website.py` checks that every address on it leads somewhere that exists and that the command it prints
+is one CI plays. A runner's own address is not a page either: opened in a browser it says what it is and points to
+the page that races there (`gladiator serve --page <address>`).
 
 ## Rules for any hosted environment
 

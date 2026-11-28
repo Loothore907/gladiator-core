@@ -1,0 +1,53 @@
+# Publishes the home page (website/) to GitHub Pages, where it answers at https://gladiatorbench.com
+# Runs only after the CI workflow has finished green on main, so the page that goes live is one whose links and
+# command were checked (tests/test_website.py). It can also be started by hand.
+# One-time setup by the owner: repository Settings -> Pages -> Source: "GitHub Actions", and Custom domain:
+# gladiatorbench.com (docs/DEPLOYMENT.md, "The home page"). Until that is done this workflow fails at its
+# second step and publishes nothing.
+name: Publish home page
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy website/ to GitHub Pages
+    # After CI: only when it passed, and only for a run on main that a push started. Never for a pull request's run.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+      actions: read # the deploy step looks up the artifact uploaded just before it
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # the exact commit CI checked, not whatever main has moved to since
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+      # The deploy step lists this run's artifacts and can look a second too early (gladiator-ledger's page
+      # failed to publish three times that way on 2026-11-23). Give the listing a moment to catch up.
+      - name: Wait for the uploaded page to be listed
+        run: sleep 20
+      - id: deployment
+        uses: actions/deploy-pages@v4
