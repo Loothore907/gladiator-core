@@ -61,6 +61,7 @@ import base64
 import datetime
 import hashlib
 import hmac
+import html
 import json
 import math
 import os
@@ -86,7 +87,7 @@ from scorers import components
 from scorers.efficiency import PROFILES
 
 SESSION_DAYS = 30  # how long a sign-in lasts
-PAGES = Path(__file__).resolve().parent / "pages"  # the build page's three static files
+PAGES = Path(__file__).resolve().parent / "pages"  # the build page's three files, and the front page
 JOB_MINUTES = 20  # how long a created test waits to be downloaded
 MAX_JOBS = 20
 MAX_DESCRIPTION = 1200
@@ -1454,9 +1455,34 @@ PAGE_POLICY = (
 )
 
 
-def handler_for(races: Races, forks: Forks | None = None, spaces=None):
+# What a person gets who opens the runner's own address in a browser. The runner is where a page sends its
+# races, not a page to read, so "/" says that and points to the page that races here (--page) instead of
+# answering "Not found.". It carries no script and loads nothing; its style is its own.
+FRONT_POLICY = (
+    "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+)
+LEDGER_HOWTO = "https://github.com/Loothore907/gladiator-ledger#race-two-models-live-with-your-own-api-key"
+PAGE_ADDRESS = re.compile(r"https?://[A-Za-z0-9.-]+(:\d{1,5})?(/[A-Za-z0-9._~/-]*)?")
+
+
+def front_page(page: str | None = None) -> bytes:
+    """The runner's own address, for a person: what this is and where races are started. `page` is the
+    address its operator named (--page), written as given; with none it says how a page is set up."""
+    if page:
+        link = f'<a href="{html.escape(page)}">{html.escape(page)}</a>'
+        where = f'<p class="go">Races on this runner are started from {link}.</p>'
+    else:
+        where = (
+            "<p>Races are started from a page that uses this runner. The Gladiator Ledger page does: "
+            f'<a href="{LEDGER_HOWTO}">its README has the two commands</a>.</p>'
+        )
+    return (PAGES / "front.html").read_text(encoding="utf-8").replace("<!-- where -->", where).encode("utf-8")
+
+
+def handler_for(races: Races, forks: Forks | None = None, spaces=None, page: str | None = None):
     """`spaces`: the assistant connection (engine/hosted.py `Spaces`), which answers /mcp, /api and
-    /space/download itself. None: this runner does not offer it."""
+    /space/download itself. None: this runner does not offer it. `page`: the page that races here (--page),
+    which the runner's own address points a person to."""
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -1526,7 +1552,9 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
             asked = dict(pair.split("=", 1) for pair in query.split("&") if "=" in pair)
             if spaces and spaces.handles(path):
                 return spaces.answer(self, "GET")
-            if path == "/options":
+            if path == "/":  # a person who opened the runner's address: say what it is and where to go
+                self._bytes(front_page(page), "text/html; charset=utf-8", {"Content-Security-Policy": FRONT_POLICY})
+            elif path == "/options":
                 self._json(200, races.options())
             elif path == "/health":
                 self._json(200, races.health())
@@ -1676,7 +1704,13 @@ def handler_for(races: Races, forks: Forks | None = None, spaces=None):
     return Handler
 
 
-def serve(races: Races, host: str, port: int, forks: Forks | None = None, spaces=None) -> ThreadingHTTPServer:
+def serve(
+    races: Races, host: str, port: int, forks: Forks | None = None, spaces=None, page: str | None = None
+) -> ThreadingHTTPServer:
     if races.codes is None and host not in ("127.0.0.1", "localhost", "::1"):
         raise SystemExit("Refusing to listen beyond this machine without access codes (set GLADIATOR_RACE_CODES).")
-    return ThreadingHTTPServer((host, port), handler_for(races, forks, spaces))
+    if page and not PAGE_ADDRESS.fullmatch(page):
+        raise SystemExit(
+            f"--page takes the web address of the page that races here, e.g. https://example.org/ (got {page!r})"
+        )
+    return ThreadingHTTPServer((host, port), handler_for(races, forks, spaces, page))

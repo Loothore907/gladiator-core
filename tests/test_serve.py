@@ -531,6 +531,61 @@ class AnswerKeyTests(unittest.TestCase):
         self.assertEqual(record.sha256(self.races.answer_key(self.run_id)), self.sealed["body"]["operator_sha256"])
 
 
+class FrontPageTests(unittest.TestCase):
+    """The runner's own address, opened by a person: it says what this is and where races are started."""
+
+    def started(self, **more):
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        server = serve.serve(make(tmp.name, codes={"judge-1"}), "127.0.0.1", 0, **more)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    def test_it_points_a_person_to_the_page_that_races_here(self):
+        with mock.patch("builtins.print"):
+            answer = urllib.request.urlopen(self.started(page="https://ledger.example.org/") + "/")
+            text = answer.read().decode()
+        self.assertEqual(answer.status, 200)
+        self.assertTrue(answer.headers["Content-Type"].startswith("text/html"))
+        self.assertIn("race runner", text)
+        self.assertIn('<a href="https://ledger.example.org/">https://ledger.example.org/</a>', text)
+        # it runs no script and loads nothing, and the browser is told to hold it to that
+        self.assertIn("default-src 'none'", answer.headers["Content-Security-Policy"])
+        self.assertNotIn("script-src", answer.headers["Content-Security-Policy"])
+        self.assertNotIn("<script", text)
+
+    def test_with_no_page_named_it_says_how_one_is_set_up(self):
+        with mock.patch("builtins.print"):
+            text = urllib.request.urlopen(self.started() + "/").read().decode()
+        self.assertIn(serve.LEDGER_HOWTO, text)
+        self.assertNotIn("Races on this runner are started from", text)
+
+    def test_every_other_unknown_address_is_still_not_found(self):
+        with mock.patch("builtins.print"):
+            url = self.started(page="https://ledger.example.org/")
+            for path in ("/index.html", "/front.html", "/nothing"):
+                with self.assertRaises(urllib.error.HTTPError) as refused:
+                    urllib.request.urlopen(url + path)
+                self.assertEqual(refused.exception.code, 404)
+                self.assertEqual(json.load(refused.exception), {"error": "Not found."})
+
+    def test_only_a_plain_web_address_is_taken_as_the_page(self):
+        with TemporaryDirectory() as tmp:
+            races = make(tmp, codes={"judge-1"})
+            for bad in (
+                "ledger.example.org",
+                "javascript:alert(1)",
+                'https://x.example/"><script>',
+                "https://x.example/?a=<b>",
+            ):
+                with self.assertRaises(SystemExit, msg=bad):
+                    serve.serve(races, "127.0.0.1", 0, page=bad)
+            for good in ("https://ledger.example.org", "https://ledger.example.org/", "http://localhost:8000/site/"):
+                serve.serve(races, "127.0.0.1", 0, page=good).server_close()
+
+
 class HttpTests(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
