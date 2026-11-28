@@ -188,7 +188,8 @@ connects: `docs/ASSISTANT.md`.
 
 ## The home page
 
-`website/` is the project's home page, one static page with no script: what Gladiator is, and where Ledger, the
+`website/` is the project's home page, one static page with no script (its pictures and fonts are in the folder, so it
+loads nothing from anywhere else): what Gladiator is, and where Ledger, the
 engine and the tests are. It is published to GitHub Pages by the "Publish home page" workflow after CI is green on
 `main`, and answers at https://gladiatorbench.com (`www` is sent there). It is not part of the container image.
 `tests/test_website.py` checks that every address on it leads somewhere that exists and that the command it prints
