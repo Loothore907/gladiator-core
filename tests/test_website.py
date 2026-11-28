@@ -1,8 +1,10 @@
 """The home page (website/, published at gladiatorbench.com by .github/workflows/pages.yml).
 
 It is one static page and a not-found page. Checked here: every address on them leads somewhere that exists, they
-run no script and load nothing from anywhere else, and the command the home page prints is one CI plays."""
+run no script and load nothing from anywhere else (the fonts and pictures are in website/), a link within the page
+names a part of it that is there, and the command the home page prints is one CI plays."""
 
+import re
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
@@ -23,11 +25,14 @@ class Read(HTMLParser):
     def __init__(self):
         super().__init__()
         self.links, self.loaded, self.tags, self.code, self.meta, self._in = [], [], [], [], {}, []
+        self.ids = set()
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         self.tags.append(tag)
         self._in.append(tag)
+        if attrs.get("id"):
+            self.ids.add(attrs["id"])
         if tag == "a":
             self.links.append(attrs.get("href") or "")
         if tag == "link" and attrs.get("rel") != "canonical":
@@ -58,9 +63,14 @@ class HomePageTests(unittest.TestCase):
 
     def test_every_link_goes_to_the_projects_own_pages_and_to_something_that_exists(self):
         for name in ("index.html", "404.html"):
-            links = read(name).links
+            page = read(name)
+            links = page.links
             self.assertTrue(links, name)
             for link in links:
+                # a link within the page (the bar along the top) names a part of the page that is there
+                if link.startswith("#"):
+                    self.assertIn(link[1:], page.ids, f"{name}: {link}")
+                    continue
                 self.assertTrue(any(link == own or link.startswith(own) for own in OWN), f"{name}: {link}")
                 # a link into this repository names a file or folder that is in it
                 if link.startswith(IN_THIS_REPO):
@@ -84,6 +94,23 @@ class HomePageTests(unittest.TestCase):
                     continue
                 self.assertNotIn("//", address, f"{name} loads {address}")
                 self.assertTrue((SITE / address).is_file(), f"{name} loads {address}, which is not in website/")
+
+    def test_the_style_sheet_loads_only_files_that_are_here(self):
+        sheet = (SITE / "styles.css").read_text(encoding="utf-8")
+        loaded = re.findall(r"url\(\s*[\"']?([^\"')]+)", sheet)
+        self.assertTrue(loaded)  # the fonts
+        for address in loaded:
+            self.assertNotIn("//", address, f"styles.css loads {address}")
+            self.assertTrue((SITE / address).is_file(), f"styles.css loads {address}, which is not in website/")
+        self.assertNotIn("@import", sheet)
+
+    def test_the_pictures_are_sized_for_the_web(self):
+        # Each picture is a compressed copy, never the full-size original: a visitor on a phone downloads them all.
+        pictures = sorted((SITE / "img").glob("*"))
+        self.assertTrue(pictures)
+        for picture in pictures:
+            self.assertEqual(picture.suffix, ".jpg", picture.name)
+            self.assertLess(picture.stat().st_size, 250_000, picture.name)
 
     def test_the_home_page_says_what_it_is(self):
         page = read("index.html")
